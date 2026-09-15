@@ -10,7 +10,7 @@ android {
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 dependencies {
     if (providers.gradleProperty("localAar").getOrElse("true") == "true") {
-        implementation(files("libs/sdk-release.aar"))
+        implementation(files("libs/wavenote-sdk.aar"))
         implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
     } else implementation("cn.wavenote:wavenote-sdk:${providers.gradleProperty("sdkVersion").getOrElse("0.2.0-alpha.1")}")
     testImplementation("junit:junit:4.13.2")

@@ -6,19 +6,25 @@ WaveNote Android 原生 Demo，演示扫描绑定连接、设备设置、空闲�
 
 Android 10 / API 29+；Kotlin 2.2.20 / Java 17。构建工具链：JDK 17、AGP 8.11.1、Gradle 8.14、Android SDK 36。
 
-本仓库不包含 SDK 源码或二进制。请先单独取得获授权的 SDK；公开 Demo 不代替 SDK 使用授权。`docs/`、本地 SDK、日志和构建结果不提交 Git。
-
-克隆后，在仓库根目录运行：
+本仓库随 Demo 提供编译后的 SDK：`app/libs/wavenote-sdk.aar`，Gradle 默认引用该文件并配置 Kotlin 标准库，无需另行下载 SDK 或运行准备脚本。SDK 源码不包含在 Demo 中；`docs/`、日志和构建结果不提交 Git。
 
 ```bash
 git clone https://github.com/yjking10/wavenote-sdk-android.git
 cd wavenote-sdk-android
-bash scripts/run.sh /absolute/path/sdk-release.aar
-# 已导入 SDK 后可直接运行
-bash scripts/run.sh
 ```
 
-Android Studio 打开本仓库目录，选择 JDK 17，并用 `ANDROID_HOME` 或本地 `local.properties` 指定 SDK。Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`；Release 默认未签名，启用 R8。
+Android Studio 打开本仓库目录，选择 JDK 17，并用 `ANDROID_HOME` 或本地 `local.properties` 指定 Android SDK。等待 Gradle 同步完成，选择 `app` 和运行设备，点击 Run。首次同步需要下载 Gradle 及构建依赖。
+
+集成到自己的工程时，将 AAR 复制到 `app/libs/wavenote-sdk.aar`，在应用模块的 `build.gradle.kts` 中添加：
+
+```kotlin
+dependencies {
+    implementation(files("libs/wavenote-sdk.aar"))
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
+}
+```
+
+更新 SDK 时替换该 AAR，保持文件名一致并重新同步 Gradle。Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`；Release 默认未签名，启用 R8。
 
 Android 12+ 允许附近设备权限；Android 10–11 允许定位并开启系统定位服务。SDK AAR 包含可选 Wi-Fi 声明，Demo 只请求 BLE 所需权限，不使用手机麦克风或广泛外部存储权限。
 
@@ -34,15 +40,3 @@ Android 12+ 允许附近设备权限；Android 10–11 允许定位并开启系�
 接入代码：[Kotlin](app/src/main/java/cn/wavenote/demo/KotlinIntegration.kt) · [Java](app/src/main/java/cn/wavenote/demo/JavaIntegration.java) · [HTTP Provider](app/src/main/java/cn/wavenote/demo/IdentityProvider.kt)。HTTP 示例只请求宿主提供的 HTTPS 服务，用户 Token 由宿主登录系统提供；Demo 界面不会发起真实身份请求。切换身份前取消旧请求并重新配置 SDK，不自动重试绑定或解绑。
 
 SDK 日志默认由 Demo 开启，仅输出脱敏摘要；可在配置处调用 `openLog(false)` 关闭。不要记录凭据、原始身份或音频。模拟归属和音频保存在应用私有目录，卸载应用会清除；解绑保留本地音频。首页只展示当前设备的文件，不自动录音。同步失败后由用户重试。
-
-## 本地验证
-
-```bash
-bash scripts/verify.sh /absolute/path/sdk-release.aar
-# 已导入 SDK 时
-bash scripts/verify.sh
-# 检查 Git 将提交/已经提交的公开内容
-python3 scripts/check-public.py
-```
-
-构建和测试不等于真实设备验收。连接空闲设备会自动同步文件，因此启动检查时不要选择设备。本仓库不携带内部硬件记录。
