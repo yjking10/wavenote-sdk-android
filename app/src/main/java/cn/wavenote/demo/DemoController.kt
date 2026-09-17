@@ -31,11 +31,12 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
     val library = DemoAudioLibrary()
     val recordingClock = DemoRecordingClock()
     val player = DemoNativePlayer(context.applicationContext)
-    private val fileQueue = java.util.concurrent.Executors.newSingleThreadExecutor()
-    private val store = DemoAudioStore(java.io.File(context.filesDir, "recordings"))
     private var libraryToken: Int? = null
     private var audioSession = 0
     private var scheduledSync = 0
+    private var progressFile: DemoAudioFile? = null
+    // 单调时钟：仅统计 FINISHING 到 completion，包含收尾和索引提交，不含传输。
+    private var oggStartedAt: Long? = null
     private var progressID: java.util.UUID? = null
     private var progressCallback: ((Long) -> Unit)? = null
     var changed: (() -> Unit)? = null
@@ -47,6 +48,7 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
     private val handler = Handler(Looper.getMainLooper())
     private var scanGeneration = 0
     private var scanning = false
+    val isScanning: Boolean get() = scanning
     private var unbindCompleted = false
     init {
         sdk.delegate = this; sdk.deviceSettings.delegate = this; sdk.recording.delegate = this; sdk.files.delegate = this
@@ -55,9 +57,9 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
         sdk.openLog(true)
         sdk.configure(WaveNoteSDKConfiguration("demo-simulation-not-a-credential", "demo-user", enableAutoReconnect = false, identityProvider = identity))
     }
-    fun dispose() { changed = null; resetAudio(); player.dispose(); fileQueue.shutdown(); sdk.files.delegate = null; handler.removeCallbacksAndMessages(null); sdk.disconnectDevice(); sdk.delegate = null; sdk.deviceSettings.delegate = null; sdk.recording.delegate = null }
+    fun dispose() { changed = null; resetAudio(); player.dispose(); sdk.files.delegate = null; handler.removeCallbacksAndMessages(null); sdk.disconnectDevice(); sdk.delegate = null; sdk.deviceSettings.delegate = null; sdk.recording.delegate = null }
     fun scan() {
-        if (flow.busy || flow.ready) return
+        if (scanning || flow.busy || flow.ready) return
         // startScanning 会重新读取系统权限与蓝牙状态，不能用上次 UNAUTHORIZED 快照阻止重试。
         flow.invalidate(); scanGeneration++; val token = scanGeneration
         devices = emptyList(); scanning = true; status = "正在扫描…"; changed?.invoke(); sdk.startScanning()
@@ -145,6 +147,7 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
     override fun didUpdate(settings: WaveNoteDeviceSettings, snapshot: WaveNoteSettingsSnapshot) { if (flow.ready) { this.snapshot = snapshot; changed?.invoke() } }
     override fun didUpdate(recording: WaveNoteRecording, snapshot: WaveNoteRecordingSnapshot) { if (flow.ready) { mode = snapshot.mode; observeRecording(snapshot); changed?.invoke() } }
     private fun configureLibrary() {
+        library.completedRow = { row -> android.util.Log.i("WaveNoteDemo", "[FileCompleted] ${row.logJSON}") }
         library.changed = { changed?.invoke() }; player.changed = { changed?.invoke() }
         library.finished = { libraryToken?.let { flow.finish(it) }; libraryToken = null; changed?.invoke() }
         library.readRecording = { done -> sdk.recording.refresh { value, error -> done(value?.let { DemoRecordingValue(it.state.value, it.fileName, it.mode) }, error?.let(::errorText)) } }
@@ -155,31 +158,26 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
         library.download = { file, progress, done ->
             val sn = sdk.connectedDevice?.serialNumber
             val session = audioSession
+            library.phase(file, "检查断点")
             var cancelled = false
             var operation: WaveNoteOperation? = null
             if (sn == null) handler.post { done(null, "连接已失效") }
-            else fileQueue.execute {
-                val result = runCatching { store.prepare(sn, file) }
-                handler.post {
-                    if (audioSession == session && flow.ready) {
-                        if (cancelled) done(null, "同步已取消")
-                        else result.fold(onSuccess = { (destination, cached) ->
-                            if (cached) done(destination.path, null)
-                            else {
-                                operation = sdk.files.download(WaveNoteFile(file.name, file.size, if (file.mode == 1) WaveNoteRecordMode.NOTE else WaveNoteRecordMode.CALL), destination) { output, error ->
-                                    if (audioSession == session) {
-                                        progressID = null; progressCallback = null
-                                        if (error != null) done(null, errorText(error))
-                                        else if (output == null) done(null, "下载未交付文件")
-                                        else fileQueue.execute {
-                                            val saved = runCatching { store.commit(output, sn, file) }
-                                            handler.post { if (audioSession == session) saved.fold({ done(output.path, null) }, { done(null, "保存本地索引失败，请检查剩余空间") }) }
-                                        }
-                                    }
-                                }
-                                progressID = operation?.identifier; progressCallback = progress
+            else sdk.files.findLocalAudio(sn, if (file.mode == 1) WaveNoteRecordMode.NOTE else WaveNoteRecordMode.CALL, file.name) { cached, error ->
+                if (audioSession == session) {
+                    if (cancelled) done(null, "同步已取消")
+                    else if (error != null) done(null, errorText(error))
+                    else if (cached != null && cached.rawBytes == file.size) done(cached.file.path, null)
+                    else {
+                        operation = sdk.files.downloadToStorage(WaveNoteFile(file.name, file.size, if (file.mode == 1) WaveNoteRecordMode.NOTE else WaveNoteRecordMode.CALL), resume = true) { audio, failure ->
+                            if (audioSession == session) {
+                                logOggDuration(if (failure == null && audio != null) "completed" else if (failure?.errorCode == WaveNoteErrorCode.OPERATION_CANCELLED) "cancelled" else "failed")
+                                progressID = null; progressCallback = null; progressFile = null
+                                if (failure != null) done(null, if (failure.operation == "downloadPositionMismatch") "downloadPositionMismatch" else errorText(failure))
+                                else if (audio != null) done(audio.file.path, null)
+                                else done(null, "下载未交付文件")
                             }
-                        }, onFailure = { done(null, "本地目录不可写或空间不足") })
+                        }
+                        progressID = operation?.identifier; progressCallback = progress; progressFile = file
                     }
                 }
             }
@@ -187,6 +185,7 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
             cancel
         }
     }
+
     fun syncFiles() {
         if (!flow.ready || library.isRecording || library.busy) return
         val token = flow.beginSetting() ?: return
@@ -208,12 +207,32 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
         if (library.isRecording) { scheduledSync++; player.stop() }
         if (wasRecording && value.state == WaveNoteRecordingState.STOPPED) scheduleSync()
     }
+    private fun logOggDuration(result: String) {
+        val started = oggStartedAt ?: return
+        oggStartedAt = null
+        val elapsedMs = (android.os.SystemClock.elapsedRealtimeNanos() - started) / 1_000_000.0
+        android.util.Log.i("WaveNoteDemo", "[OpusToOgg] operationID=$progressID result=$result elapsedMs=${String.format(java.util.Locale.ROOT, "%.1f", elapsedMs)} rawBytes=${progressFile?.size ?: 0} scope=finishingToCompletion")
+    }
     private fun resetAudio() {
+        logOggDuration("interrupted")
         audioSession++; scheduledSync++; libraryToken = null; progressID = null; progressCallback = null
         library.invalidate(); recordingClock.update(DemoRecordingValue(0, null, null)); player.stop()
     }
     override fun didUpdate(files: WaveNoteFiles, progress: WaveNoteTransferProgress) {
-        if (flow.ready && progress.operationID == progressID) progressCallback?.invoke(progress.receivedBytes)
+        if (flow.ready && progress.operationID == progressID) {
+            if (progress.state == WaveNoteOperationState.FINISHING && oggStartedAt == null) oggStartedAt = android.os.SystemClock.elapsedRealtimeNanos()
+            progressFile?.let { file ->
+                when (progress.state) {
+                    WaveNoteOperationState.RUNNING -> if (library.rows.firstOrNull { it.file.key == file.key }?.status == "检查断点") library.phase(file, "正在同步")
+                    WaveNoteOperationState.CHECKING_STORAGE -> library.phase(file, "检查断点")
+                    WaveNoteOperationState.RESUMING -> library.phase(file, "继续下载")
+                    WaveNoteOperationState.REPACKAGING -> library.phase(file, "重新封装")
+                    else -> {}
+                }
+            }
+            if (progress.state in listOf(WaveNoteOperationState.RUNNING, WaveNoteOperationState.FINISHING, WaveNoteOperationState.COMPLETED)) progressCallback?.invoke(progress.receivedBytes)
+            if (progress.state == WaveNoteOperationState.FINISHING) library.converting(progress.convertedBytes, progress.totalBytes)
+        }
     }
     companion object {
         fun errorText(error: WaveNoteError) = DemoValues.error(error.code)

@@ -5,6 +5,19 @@ import org.junit.Test
 import java.nio.file.Files
 
 class DemoAudioTest {
+    @Test fun transferRateExcludesResumeOffsetAndThrottlesSamples() {
+        val rate = DemoTransferRate()
+        assertNull(rate.sample(100_000, 10.0))
+        assertNull(rate.sample(100_512, 10.25))
+        assertEquals(2.0, rate.sample(101_024, 10.5)!!, 0.001)
+        assertEquals(0.0, rate.sample(101_024, 11.0)!!, 0.001)
+        assertNull(rate.sample(0, 12.0))
+        val row = DemoAudioRow(file)
+        row.status = "继续下载"; row.kilobytesPerSecond = 2.0
+        assertTrue(row.speedText.contains("KB/s"))
+        row.status = "正在生成音频文件 10%"; assertEquals("", row.speedText)
+        row.status = "同步完成"; assertEquals("", row.speedText)
+    }
     private val stopped = DemoRecordingValue(1, null, null)
     private val active = DemoRecordingValue(2, "1800000000.opus", 1)
     private val file = DemoAudioFile("one.opus", 7, 1)
@@ -13,17 +26,49 @@ class DemoAudioTest {
         count = { mode, done -> done(if (mode == 1) 1 else 0, null) }
         page = { _, _, done -> done(listOf(file), null) }
     }
+    @Test fun managedPathRedactsUserInCompletionLog() {
+        val row = DemoAudioRow(DemoAudioFile("test.opus",7,1))
+        row.localPath = "/private/wavenote/sensitive-user/device/file/id.ogg"
+        assertFalse(row.logJSON.contains("sensitive-user")); assertTrue(row.logJSON.contains("[redacted]"))
+        assertTrue(row.localPath!!.contains("sensitive-user"))
+    }
     @Test fun stoppedListsBothModesThenSequentialDownloadsWithProgress() {
         val lib = configured(); val calls = mutableListOf<String>(); var complete: ((String?, String?) -> Unit)? = null; var progress: ((Long) -> Unit)? = null
         lib.count = { mode, done -> calls.add("count$mode"); done(1, null) }
         lib.page = { mode, _, done -> calls.add("page$mode"); done(listOf(DemoAudioFile("one.opus", 7, mode)), null) }
         lib.download = { file, update, done -> calls.add("download${file.mode}"); progress = update; complete = done; {} }
+        val logs = mutableListOf<DemoAudioRow>(); lib.completedRow = { logs.add(it) }
         assertTrue(lib.start()); assertFalse(lib.start())
         assertEquals(listOf("count1", "page1", "count2", "page2", "download1"), calls)
+        assertEquals("已完成同步 0/2 个文件", lib.syncCountText)
         progress!!(3); assertEquals(3L, lib.rows[0].received); assertNull(lib.rows[0].localPath)
+        lib.converting(3,7); assertEquals("正在生成音频文件 42%", lib.rows[0].status)
+        assertEquals(0,lib.completedCount); assertNull(lib.rows[0].localPath)
         val first = complete!!; first("/one.ogg", null); first("/wrong.ogg", null)
-        assertEquals("download2", calls.last()); assertEquals("/one.ogg", lib.rows[0].localPath)
+        assertEquals("download2", calls.last()); assertEquals("/one.ogg", lib.rows[0].localPath); assertEquals(1, lib.completedCount)
         complete!!("/two.ogg", null); assertFalse(lib.busy); assertEquals("/two.ogg", lib.rows[1].localPath)
+        assertEquals("已完成同步 2/2 个文件", lib.syncCountText)
+        assertEquals(2,logs.size)
+        val json = org.json.JSONObject(logs[0].logJSON)
+        assertEquals(7,json.getInt("received")); assertEquals("同步完成",json.getString("status"))
+        assertEquals("/one.ogg",json.getString("localPath")); assertEquals("one.opus",json.getJSONObject("file").getString("name"))
+    }
+    @Test fun positionFailureSkipsFileUntilReconnect() {
+        val lib = configured(); val downloads = mutableListOf<String>()
+        lib.count = { mode, done -> done(if (mode == 1) 2 else 0, null) }
+        lib.page = { mode, _, done -> done(if (mode == 1) listOf(file, DemoAudioFile("two.opus", 7, 1)) else emptyList(), null) }
+        lib.download = { item, _, done ->
+            downloads += item.name
+            done(if (item.name == "one.opus") null else "/two.ogg", if (item.name == "one.opus") "downloadPositionMismatch" else null)
+            val cancel: () -> Unit = {}
+            cancel
+        }
+        assertTrue(lib.start())
+        assertEquals(listOf("one.opus", "two.opus"), downloads)
+        assertEquals(1, lib.failedCount); assertEquals(1, lib.completedCount)
+        assertTrue(lib.message.contains("失败 1"))
+        assertTrue(lib.start())
+        assertEquals(listOf("one.opus", "two.opus", "two.opus"), downloads)
     }
     @Test fun recordingPausedAndUnknownNeverList() {
         for (state in listOf(0, 2, 3)) {
@@ -82,16 +127,37 @@ class DemoAudioTest {
         clock.update(DemoRecordingValue(2, "bad.opus", 1), 1800000025.0, 115.0)
         assertFalse(clock.estimated); assertEquals(3L, clock.seconds(118.0)); clock.update(stopped); assertEquals(0L, clock.seconds())
     }
-    @Test fun storeRequiresCommitAndSeparatesDeviceModeAndSize() {
-        val root = Files.createTempDirectory("demo-audio").toFile()
-        try {
-            val store = DemoAudioStore(root); val first = store.prepare("fake-device-a", file)
-            first.first.writeBytes(byteArrayOf(1,2,3)); assertFalse(store.prepare("fake-device-a", file).second)
-            store.commit(first.first, "fake-device-a", file); assertTrue(store.prepare("fake-device-a", file).second)
-            assertFalse(store.prepare("fake-device-b", file).second)
-            assertFalse(store.prepare("fake-device-a", file.copy(size = 8)).second)
-            assertFalse(store.prepare("fake-device-a", file.copy(mode = 2)).second)
-            first.first.delete(); assertFalse(store.prepare("fake-device-a", file).second)
-        } finally { root.deleteRecursively() }
+
+
+
+    @Test fun resumePhasesNeverMarkCompletedAndIgnoreDisconnectedState() {
+        val lib = configured(); lib.download = { _,_,_ -> {} }; lib.start()
+        lib.phase(file,"检查断点"); assertEquals("检查断点",lib.rows[0].status)
+        lib.phase(file,"继续下载"); assertEquals("继续下载",lib.rows[0].status)
+        lib.phase(file,"重新封装"); lib.converting(7,7)
+        assertEquals("重新封装 100%",lib.rows[0].status); assertEquals(0,lib.completedCount)
+        lib.invalidate(); lib.phase(file,"继续下载"); assertTrue(lib.rows.isEmpty())
     }
+
+    private fun recoveryOgg(): ByteArray {
+        fun le(n: Long, count: Int) = ByteArray(count) { (n ushr (it*8)).toByte() }
+        fun page(body: ByteArray, number: Int, flags: Int, granule: Long, laces: ByteArray = byteArrayOf(body.size.toByte())): ByteArray {
+            val data = "OggS".toByteArray() + byteArrayOf(0,flags.toByte()) + le(granule,8) + le(1,4) + le(number.toLong(),4) + ByteArray(4) + byteArrayOf(laces.size.toByte()) + laces + body
+            return recoveryCRC(data)
+        }
+        val head = "OpusHead".toByteArray() + byteArrayOf(1,1,0,0,0,0,0,0,0,0,0)
+        val tags = "OpusTags".toByteArray() + ByteArray(8)
+        val packet = byteArrayOf(0xf8.toByte(),0xff.toByte(),0xfe.toByte())
+        return page(head,0,2,0) + page(tags,1,0,0) + page(ByteArray(150) { packet[it%3] },2,4,48000,ByteArray(50){3})
+    }
+    private fun recoveryCRC(page: ByteArray): ByteArray {
+        val bytes = page.copyOf(); repeat(4) { bytes[22+it]=0 }
+        var crc = 0
+        for (b in bytes) { crc = crc xor ((b.toInt() and 255) shl 24); repeat(8) { crc = if (crc<0) (crc shl 1) xor 0x04c11db7 else crc shl 1 } }
+        repeat(4) { bytes[22+it]=(crc ushr (8*it)).toByte() }; return bytes
+    }
+
+
+
+
 }

@@ -13,4 +13,9 @@ object KotlinIntegration {
     fun battery(sdk: WaveNoteSDK, completion: WaveNoteCompletion<WaveNoteSettingsSnapshot>) {
         sdk.deviceSettings.query(WaveNoteSetting.BATTERY, completion)
     }
+    /** 查询当前用户指定设备的本地音频；不要求连接，无匹配为 null/null。 */
+    fun localAudio(sdk: WaveNoteSDK, sn: String, mode: WaveNoteRecordMode, name: String, completion: WaveNoteCompletion<WaveNoteLocalAudio>) =
+        sdk.files.findLocalAudio(sn, mode, name, completion)
+    fun download(sdk: WaveNoteSDK, file: WaveNoteFile, resume: Boolean, completion: WaveNoteCompletion<WaveNoteLocalAudio>): WaveNoteOperation =
+        sdk.files.downloadToStorage(file, resume = resume, completion = completion)
 }

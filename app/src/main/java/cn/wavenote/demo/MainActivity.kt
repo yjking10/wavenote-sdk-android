@@ -36,6 +36,10 @@ class MainActivity : Activity() {
     private lateinit var body: LinearLayout
     private lateinit var scroll: ScrollView
     private var lastPage = ""
+    private var renderedScanning = false
+    private var nearbyList: LinearLayout? = null
+    private val nearbyRows = linkedMapOf<String, Pair<TextView, TextView>>()
+    private var nearbyPlaceholder: TextView? = null
     private var playbackTime: TextView? = null
     private var playbackProgress: ProgressBar? = null
     private fun updatePlaybackProgress() {
@@ -44,6 +48,12 @@ class MainActivity : Activity() {
         playbackProgress?.contentDescription = "播放进度 ${model.player.timeText}"
     }
     private val timer = android.os.Handler(android.os.Looper.getMainLooper())
+    // 广播及传输回调会密集到达，合并刷新，避免为每个回调重建整页并挤占触摸处理。
+    private val renderGate = DemoRefreshGate(
+        schedule = { callback -> timer.postDelayed(callback, 250) },
+        refresh = { if (!isFinishing && !isDestroyed) render() }
+    )
+    private fun requestRender() { renderGate.request() }
     private val tick = object : Runnable { override fun run() { if (page == "recording") render(); timer.postDelayed(this, 1000) } }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,14 +61,14 @@ class MainActivity : Activity() {
         model.player.progressChanged = { updatePlaybackProgress() }
         model.changed = {
             if (!model.flow.ready && page != "home") { page = "home"; dialog?.dismiss(); dialog = null }
-            render()
+            requestRender()
         }
         if (Build.VERSION.SDK_INT >= 33) onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) { back() }
         render()
     }
     override fun onStart() { super.onStart(); timer.postDelayed(tick, 1000) }
     override fun onStop() { timer.removeCallbacks(tick); model.player.stop(); super.onStop() }
-    override fun onDestroy() { model.dispose(); super.onDestroy() }
+    override fun onDestroy() { renderGate.close(); timer.removeCallbacksAndMessages(null); model.dispose(); super.onDestroy() }
     @SuppressLint("GestureBackNavigation")
     @Deprecated("Compatibility with Android 10–12") override fun onBackPressed() { back() }
     private fun back() { when (page) { "home" -> finish(); "settings", "recording" -> { page = "home"; render() }; else -> { page = "settings"; render() } } }
@@ -79,6 +89,12 @@ class MainActivity : Activity() {
     private fun navigate(value: String) { if (model.flow.ready) { page = value; render() } }
     private fun render() {
         if (isFinishing || isDestroyed) return
+        // 扫描中保留视图实例和触摸目标，仅更新发现项，避免重建页面打断滚动/点击。
+        if (page == "home" && lastPage == "home" && model.isScanning && renderedScanning && nearbyList != null) {
+            updateNearbyDevices(); return
+        }
+        renderedScanning = page == "home" && model.isScanning
+        nearbyList = null; nearbyRows.clear(); nearbyPlaceholder = null
         val oldScroll = if (::scroll.isInitialized && lastPage == page) scroll.scrollY else 0
         lastPage = page
         playbackTime = null; playbackProgress = null
@@ -105,16 +121,42 @@ class MainActivity : Activity() {
     }
     private fun home() {
         section("连接设备")
-        row("开始扫描", enabled = !model.flow.busy && !model.flow.ready) { requestScan() }
+        row(if (model.isScanning) "正在扫描…" else "开始扫描", enabled = !model.isScanning && !model.flow.busy && !model.flow.ready) { requestScan() }
         row(model.bluetooth) { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
         note(model.status)
         note("演示身份：本地模拟。绑定仅在本机保存，两端不共享。")
         if (model.flow.ready) audioLibrary()
         if (!model.flow.showsNearby) return
         section("附近设备")
-        if (model.devices.isEmpty()) note("扫描后，附近的 Note 设备会显示在这里。")
+        nearbyList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; body.addView(this) }
+        updateNearbyDevices()
+    }
+    private fun updateNearbyDevices() {
+        val list = nearbyList ?: return
+        if (model.devices.isEmpty()) {
+            if (nearbyPlaceholder == null) {
+                nearbyPlaceholder = label("扫描后，附近的 Note 设备会显示在这里。", 13f, muted)
+                list.addView(nearbyPlaceholder)
+            }
+            return
+        }
+        nearbyPlaceholder?.let { list.removeView(it) }; nearbyPlaceholder = null
         model.devices.forEach { device ->
-            row(device.serialNumber, "${device.name ?: "Note"} · ${device.rssi} dBm · ${if (model.identity.isBound(device.serialNumber)) "已绑定" else "未绑定"}", enabled = !model.flow.busy && !model.flow.ready) { model.select(device) }
+            val labels = nearbyRows.getOrPut(device.serialNumber) {
+                val item = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.WHITE) }
+                val title = label(device.serialNumber)
+                val detail = label("", 14f, muted).apply { setPadding(dp(20), 0, dp(20), dp(14)) }
+                item.addView(title); item.addView(detail)
+                item.setOnClickListener {
+                    // 读取最新广播快照，避免行复用后选中旧的扫描对象。
+                    if (!model.flow.busy && !model.flow.ready) model.devices.firstOrNull { it.serialNumber == device.serialNumber }?.let(model::select)
+                }
+                list.addView(item)
+                list.addView(View(this).apply { setBackgroundColor(Color.rgb(232, 236, 239)) }, LinearLayout.LayoutParams(-1, dp(1)))
+                title to detail
+            }
+            val text = "${device.name ?: "Note"} · ${device.rssi} dBm · ${if (model.identity.isBound(device.serialNumber)) "已绑定" else "未绑定"}"
+            if (labels.second.text.toString() != text) labels.second.text = text
         }
     }
     private fun audioLibrary() {
@@ -124,7 +166,7 @@ class MainActivity : Activity() {
             return
         }
         section("录音文件")
-        row(if (model.library.busy) "停止同步" else "重新同步文件", model.library.message, enabled = model.library.busy || !model.flow.busy) {
+        row(if (model.library.busy) "停止同步" else "重新同步文件", "${model.library.syncCountText}\n${model.library.message}", enabled = model.library.busy || !model.flow.busy) {
             if (model.library.busy) model.library.stop() else model.syncFiles()
         }
         model.library.rows.forEach(::audioFileRow)
@@ -143,7 +185,7 @@ class MainActivity : Activity() {
         }
         val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         details.addView(label(item.file.name).apply { setPadding(0, 0, 0, dp(4)) })
-        details.addView(label("${if (item.file.mode == 1) "Note" else "Call"} · ${item.status} · $percent%\n${android.text.format.Formatter.formatFileSize(this, item.received)} / ${android.text.format.Formatter.formatFileSize(this, item.file.size)}", 13f, muted).apply { setPadding(0, 0, 0, 0) })
+        details.addView(label("${if (item.file.mode == 1) "Note" else "Call"} · ${item.status} · $percent%${item.speedText}\n${android.text.format.Formatter.formatFileSize(this, item.received)} / ${android.text.format.Formatter.formatFileSize(this, item.file.size)}", 13f, muted).apply { setPadding(0, 0, 0, 0) })
         container.addView(details, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(12) })
         val accessory = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
         container.addView(accessory, LinearLayout.LayoutParams(dp(if (active) 142 else if (path != null) 64 else 80), -2))

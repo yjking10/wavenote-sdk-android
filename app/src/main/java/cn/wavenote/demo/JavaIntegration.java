@@ -12,4 +12,10 @@ public final class JavaIntegration {
     public static void battery(WaveNoteSDK sdk, WaveNoteCompletion<WaveNoteSettingsSnapshot> completion) {
         sdk.getDeviceSettings().query(WaveNoteSetting.BATTERY, completion);
     }
+    public static void localAudio(WaveNoteSDK sdk, String sn, WaveNoteRecordMode mode, String name, WaveNoteCompletion<WaveNoteLocalAudio> completion) {
+        sdk.getFiles().findLocalAudio(sn, mode, name, completion);
+    }
+    public static WaveNoteOperation download(WaveNoteSDK sdk, WaveNoteFile file, boolean resume, WaveNoteCompletion<WaveNoteLocalAudio> completion) {
+        return sdk.getFiles().downloadToStorage(file, WaveNoteTransferTransport.BLUETOOTH, resume, completion);
+    }
 }
