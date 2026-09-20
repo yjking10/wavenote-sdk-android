@@ -294,6 +294,7 @@ class MainActivity : Activity() {
         section("连接管理")
         row("断开连接", enabled = idle, destructive = true) { model.disconnect() }
         row("解绑设备", enabled = idle, destructive = true) { confirm("解绑设备", "仅解除本机演示账户归属，不清空设备内容。") { model.unbind() } }
+        row("解绑设备并清空内容", enabled = idle, destructive = true) { confirm("解绑设备并清空内容", "R202 将解除本机演示账户归属并永久清空设备内容，此操作不可恢复；其他设备仅解绑。") { model.unbind(eraseDeviceFiles = true) } }
         note("演示身份：本地模拟")
     }
     private fun gain() {

@@ -37,7 +37,7 @@ Android 12+ 允许附近设备权限；Android 10–11 允许定位并开启系�
 5. 点击顶部已连接 SN 进入设置；电量等查询顺序执行，设置等待回读确认。增益使用 0–255 原始整数。
 6. 断开时停止同步和播放、退出设置并隔离旧回调。断开保留模拟归属；解绑需确认，不清空设备内容。维护操作需确认，结果未确认不能当作执行成功。
 
-接入代码：[Kotlin](app/src/main/java/cn/wavenote/demo/KotlinIntegration.kt) · [Java](app/src/main/java/cn/wavenote/demo/JavaIntegration.java) · [HTTP Provider](app/src/main/java/cn/wavenote/demo/IdentityProvider.kt)。HTTP 示例只请求宿主提供的 HTTPS 服务，用户 Token 由宿主登录系统提供；Demo 界面不会发起真实身份请求。切换身份前取消旧请求并重新配置 SDK，不自动重试绑定或解绑。
+接入代码：[Kotlin](app/src/main/java/cn/wavenote/demo/KotlinIntegration.kt) · [Java](app/src/main/java/cn/wavenote/demo/JavaIntegration.java) · [HTTP Provider](app/src/main/java/cn/wavenote/demo/IdentityProvider.kt)。HTTP Provider 在每次调用时从宿主登录会话取得 Token 快照，SDK 配置和接口不接收凭据；Demo 界面不会发起真实身份请求。退出登录先调用 `clearConfiguration()`，再取消旧请求、删除用户密钥缓存和登录态；不自动重试绑定或解绑。
 
 SDK 日志默认由 Demo 调用 `sdk.openLog(true)` 开启，Debug / Release 均输出脱敏摘要到 Logcat，统一标签为 `WaveNoteSDK`；Demo 自身的文件完成和 Ogg 封装耗时日志使用 `WaveNoteDemo`。可用以下命令只查看相关日志：
 
@@ -45,7 +45,7 @@ SDK 日志默认由 Demo 调用 `sdk.openLog(true)` 开启，Debug / Release 均
 adb logcat -s WaveNoteSDK:V WaveNoteDemo:V '*:S'
 ```
 
-需要关闭 SDK 日志时调用 `sdk.openLog(false)`。不要记录凭据、原始身份或音频。模拟归属和音频保存在应用私有目录，卸载应用会清除；解绑保留本地音频。首页只展示当前设备的文件，不自动录音。同步失败后保留任务和原始文件，由用户重连后继续；同一会话不会重复续传。元数据缺失或损坏时明确报错，不自动覆盖或丢弃原文件。新目录为 `wavenote/安全编码的userIdentifier/SHA256(SN)/SHA256("mode:文件名")/设备文件主名.ogg`，由 SDK 管理。旧 Demo 的 Recordings/recordings 目录原样保留，不自动迁移或认领。文件匹配不包含设备端内容哈希，不能识别同名同大小的内容替换。
+需要关闭 SDK 日志时调用 `sdk.openLog(false)`。不要记录登录凭据、设备签名、用户密钥、原始身份或音频。模拟归属和音频保存在应用私有目录，卸载应用会清除；解绑保留本地音频。首页只展示当前设备的文件，不自动录音。同步失败后保留任务和原始文件，由用户重连后继续；同一会话不会重复续传。元数据缺失或损坏时明确报错，不自动覆盖或丢弃原文件。新目录为 `wavenote/安全编码的userIdentifier/SHA256(SN)/SHA256("mode:文件名")/设备文件主名.ogg`，由 SDK 管理。旧 Demo 的 Recordings/recordings 目录原样保留，不自动迁移或认领。文件匹配不包含设备端内容哈希，不能识别同名同大小的内容替换。
 
 文件同步成功并保存完成索引后，Demo输出一条 `[FileCompleted]` JSON日志，包含完整DemoAudioRow字段（file.name/size/mode/key、received、status、localPath）。缓存复用成功也会输出；重复或旧completion不重复记录。日志只包含文件元信息，localPath 的用户目录段替换为 `[redacted]`，不包含音频字节、原始 SN 或凭据。
 
@@ -63,4 +63,4 @@ demoR202UserPublicKeyB64=…
 demoR202UserPrivateKeyPkcs8B64=…
 ```
 
-This is a temporary local migration path: it compiles the development key into the local **Debug** APK and must never be used for production credentials. Release builds always omit these values. Omit both properties to use the Demo's normal per-account development key pair.
+This is a temporary local migration path: it compiles the development key into the local **Debug** APK and must never be used for production credentials. Release builds always omit these values. Omit both properties to use the Demo's in-memory per-account development key pair; the Demo never persists the private key.
