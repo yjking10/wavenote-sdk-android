@@ -125,7 +125,10 @@ class MainActivity : Activity() {
         row(model.bluetooth) { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
         note(model.status)
         note("演示身份：本地模拟。绑定仅在本机保存，两端不共享。")
-        if (model.flow.ready) audioLibrary()
+        if (model.flow.ready) {
+            recordingControls()
+            audioLibrary()
+        }
         if (!model.flow.showsNearby) return
         section("附近设备")
         nearbyList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; body.addView(this) }
@@ -159,6 +162,14 @@ class MainActivity : Activity() {
             if (labels.second.text.toString() != text) labels.second.text = text
         }
     }
+    private fun recordingControls() {
+        section("录音控制")
+        val state = model.sdk.recording.snapshot.state
+        val canStart = !model.flow.busy && !model.library.busy && state == cn.wavenote.sdk.WaveNoteRecordingState.STOPPED
+        val canStop = !model.flow.busy && !model.library.busy && (state == cn.wavenote.sdk.WaveNoteRecordingState.RECORDING || state == cn.wavenote.sdk.WaveNoteRecordingState.PAUSED)
+        row("开始录音", "设备空闲时开始录音", enabled = canStart) { model.startRecording() }
+        row("停止录音", "结束正在进行或已暂停的录音", enabled = canStop, destructive = true) { model.stopRecording() }
+    }
     private fun audioLibrary() {
         if (model.library.isRecording) {
             section("当前录音")
@@ -171,7 +182,7 @@ class MainActivity : Activity() {
         }
         model.library.rows.forEach(::audioFileRow)
         if (model.player.message.isNotEmpty()) note(model.player.message)
-        note("音频仅保存在本机，不删除设备文件。下载中停止同步可能断开蓝牙，需要重新连接。")
+        note("音频仅保存在本机。长按已完成文件可删除本地音频。下载中停止同步可能断开蓝牙，需要重新连接。")
     }
     /** 与 iOS 文件行一致：左侧文件信息，右侧播放按钮、时间和细进度条。 */
     private fun audioFileRow(item: DemoAudioRow) {
@@ -182,6 +193,16 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.WHITE); setPadding(dp(20), dp(14), dp(20), dp(14))
             minimumHeight = dp(if (active) 112 else 74)
+        }
+        if (path != null && !model.library.busy) {
+            container.setOnLongClickListener {
+                confirm("删除本地音频", "仅删除本机已下载的音频，不会删除设备文件。") {
+                    model.library.deleteLocalAudio(item.file) { error ->
+                        if (error != null) { model.status = error; render() }
+                    }
+                }
+                true
+            }
         }
         val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         details.addView(label(item.file.name).apply { setPadding(0, 0, 0, dp(4)) })

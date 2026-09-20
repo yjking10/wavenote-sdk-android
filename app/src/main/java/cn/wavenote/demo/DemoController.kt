@@ -5,8 +5,18 @@ import android.os.Handler
 import android.os.Looper
 import cn.wavenote.sdk.*
 import java.security.MessageDigest
+import java.security.KeyFactory
+import java.security.Signature
+import java.security.spec.PKCS8EncodedKeySpec
+import java.util.Base64
 
 class DemoIdentityProvider(context: Context) : WaveNoteIdentityProvider {
+    companion object {
+        // DEV ONLY. This reference key may only be used with development firmware.
+        // Production signing must happen in the cloud; never ship a production private key in an APK.
+        private const val DEV_CLOUD_PRIVATE_KEY_PKCS8_B64 = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCTCT6eB7rCsqaLcrY9KxfLLNNLahrF2mAPY2bki1TeBpw44a3LSV9R1dlQg+P00tnvJm5i5yrr49liwlKeOoaCT7Ryv9rbm5TanX2rv6O/SvDPBeqDOyVduobWbi4UPJ3Pq4qO4qKyg4T7soODQKNK5Lw5RJCJoS8orSGe/Ncb4ke7F/7olaWRV8cTpieygYnFgeo9bat6x99o5sBNkSgLBszRlj6SeGoLefsohpeEOiuk1boL9QCPgTXfsYwpGuWQz3cy7p40cBxhCyrBoGlOjybyZLanv2YG/ieUT7vRLqIr8YMBwhyoCkhz549I0wpFpaa6nVK/JU+y1SvOeReBAgMBAAECggEALa4TEpSTLJbFEBCw1lsTds8zy7uomqxH6K/4kOtKj/ncwf02+a+PWgTGkXGQOgjhpR867yYjWwq8CCcX9Ml47XYmuPmq3Ew/GBYSq2+Lx0vYeXC8lU2kQ7TF3Et5rFbSrmh8UPzPEAe1Il8o5XeI46UhZudKwj9dv9Td259wktwmtwM6WMIt0QeNHgZhlmsUwX35d0dvNjGx6PCc8cXTUb2PI52kfbMknAyDYysDlO+b8teTizPJNAbRXBpbtpiS/bE5ox9VlynCLCi3KKyfHElkdkTs4+EJwmQ91uQRF3673dDhwoEDWl01RHQ4QJetYGzqsTTLkwcMRIjLiss/SwKBgQDMYDhREG+vYZI8JdKiOK+m894vhigVte3cL1sirZdF76EHYkO+ctJakUbiLGl/0/q9ickztJkFUorlseaY22nStaj8waHhSyQEh+zGVE/Cy7v1gKq61hXBXbcg3lW+0haremx3W4HKijEnLgw4y51wFpTUPIaiZ4ufGPPJ/CgFCwKBgQC4LTOjtdqnDbMSEQtVSOA8f1zkPHtJNuMNMZrhmRODS/a0t2OmMqBhM6lWnGM3o1UgfA7z7viYryWb/bDM1F4gRleBBTaTH69rJDO02P8Ab9hu4CwfZ3Gbt1c6+gZV5Un516oHc4u0yAWH+fOYdsKYFs7ZKt2dY9ubuNQ15tOVIwKBgQCH9aLBWtvRomk0Fj1PqcJAoI84sljMSKEaD27jXPP7lHRdgyNp+NyzX132bHEqloyBtr3g5c2+WrEIKRcsrRpzEGKA8xeL1v74/KupLMF65yn9IkFx1aXXY07GUOJd9Ukbfm/V30wyv0f/toRu7BWqUXtkzXcLZzLc/i6AOn0tDQKBgBSs1lgxaPtJ2WlUyn3ncWy5K3dfpsNgSvrHL8jVg1BA7c/5qlEU69Ydk4vqgGTVjA/afV8622NgfgtV3kwQJwTegKI2MJsxemK/rKJHndCxvY0s0ycvWJyPZ1ZyjNWFqNlIMYkmmm9P6PcLwyHBazThkpTkb/5kIFoJ1KC8adIbAoGAHXqvJz+PTLPCInTa6HERiDPICpJegv6epW6/rPHEsH3Vt5/vT1vpUl0O4UgAJdRcgLbSzWIXH4iIRF2Z8lZCAit3x3f+NXf+934Ub4HwwOkUSN9aenbaA5Gqi9w/OtQ/cX0gqwlBsJL32DGEq5gv5R+CQ9qF97VbIXSkkVLDpcg="
+    }
+    private val authPrefs = context.getSharedPreferences("demo.r202.auth", Context.MODE_PRIVATE)
     private val prefs = context.getSharedPreferences("demo.ownership", Context.MODE_PRIVATE)
     private val store = DemoOwnershipStore({ prefs.all.mapNotNull { (key, value) -> (value as? String)?.let { key to it } }.toMap() },
         { values -> prefs.edit().clear().also { edit -> values.forEach { (key, value) -> edit.putString(key, value) } }.apply() })
@@ -21,6 +31,31 @@ class DemoIdentityProvider(context: Context) : WaveNoteIdentityProvider {
     }
     override fun unbind(serialNumber: String, apiKey: String, userIdentifier: String, completion: WaveNoteControlCompletion) {
         completion.complete(if (store.unbind(hash(serialNumber), hash(userIdentifier))) null else WaveNoteError(WaveNoteErrorCode.CLOUD_UNBIND_FAILED, "unbind"))
+    }
+    override fun authenticateDevice(serialNumber: String, apiKey: String, userIdentifier: String, completion: WaveNoteCompletion<WaveNoteAuthenticationMaterial>) {
+        // DEVELOPMENT ONLY: production apps must request this signature and user key pair from their cloud service.
+        // Never embed a production cloud private key in an APK or write private-key material to logs.
+        try {
+            val key = "${hash(userIdentifier)}.key"
+            val factory = KeyFactory.getInstance("RSA")
+            val existingPublic = authPrefs.getString("$key.pub", null)
+            val existingPrivate = authPrefs.getString("$key.priv", null)
+            val configuredPublic = BuildConfig.DEMO_R202_USER_PUBLIC_KEY_B64.takeIf(String::isNotBlank)
+            val configuredPrivate = BuildConfig.DEMO_R202_USER_PRIVATE_KEY_PKCS8_B64.takeIf(String::isNotBlank)
+            val pair = if (configuredPublic != null && configuredPrivate != null) java.security.KeyPair(
+                factory.generatePublic(java.security.spec.X509EncodedKeySpec(Base64.getDecoder().decode(configuredPublic))),
+                factory.generatePrivate(PKCS8EncodedKeySpec(Base64.getDecoder().decode(configuredPrivate)))
+            ) else if (existingPublic != null && existingPrivate != null) java.security.KeyPair(
+                factory.generatePublic(java.security.spec.X509EncodedKeySpec(Base64.getDecoder().decode(existingPublic))),
+                factory.generatePrivate(PKCS8EncodedKeySpec(Base64.getDecoder().decode(existingPrivate)))
+            ) else java.security.KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair().also {
+                authPrefs.edit().putString("$key.pub", Base64.getEncoder().encodeToString(it.public.encoded))
+                    .putString("$key.priv", Base64.getEncoder().encodeToString(it.private.encoded)).apply()
+            }
+            val privateKey = factory.generatePrivate(PKCS8EncodedKeySpec(Base64.getDecoder().decode(DEV_CLOUD_PRIVATE_KEY_PKCS8_B64)))
+            val signature = Signature.getInstance("SHA256withRSA").apply { initSign(privateKey); update(serialNumber.toByteArray(Charsets.US_ASCII)) }.sign()
+            completion.complete(WaveNoteAuthenticationMaterial(Base64.getEncoder().encodeToString(signature), Base64.getEncoder().encodeToString(pair.public.encoded), Base64.getEncoder().encodeToString(pair.private.encoded)), null)
+        } catch (_: Exception) { completion.complete(null, WaveNoteError(WaveNoteErrorCode.IDENTITY_PROVIDER_UNAVAILABLE, "demoR202Authentication")) }
     }
 }
 
@@ -111,6 +146,27 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
             }
         })
     }
+    /** 只允许空闲设备开始录音；最终状态以 recording delegate 为准。 */
+    fun startRecording() = controlRecording(starting = true)
+    /** 允许停止正在录音或已暂停的设备录音。 */
+    fun stopRecording() = controlRecording(starting = false)
+    private fun controlRecording(starting: Boolean) {
+        if (!flow.ready) return
+        if (library.busy) { status = "文件同步中，请等待同步完成后再操作录音。"; changed?.invoke(); return }
+        val token = flow.beginSetting() ?: run { status = "设备忙碌，请等待当前操作完成。"; changed?.invoke(); return }
+        val state = sdk.recording.snapshot.state
+        val canControl = if (starting) state == WaveNoteRecordingState.STOPPED else state == WaveNoteRecordingState.RECORDING || state == WaveNoteRecordingState.PAUSED
+        if (!canControl) { flow.finish(token); status = "录音状态未知，请稍后重试。"; changed?.invoke(); return }
+        status = if (starting) "正在开启录音…" else "正在停止录音…"; changed?.invoke()
+        val completion = WaveNoteControlCompletion { error ->
+            if (flow.accepts(token) && flow.ready) {
+                flow.finish(token)
+                status = error?.let(::errorText) ?: if (starting) "录音已开启，文件同步已暂停。" else "录音已停止，准备同步文件。"
+                changed?.invoke()
+            }
+        }
+        if (starting) sdk.recording.start(completion) else sdk.recording.stop(completion)
+    }
     fun disconnect() { if (!flow.busy) sdk.disconnectDevice() }
     fun unbind() {
         val token = flow.beginSetting() ?: return
@@ -183,6 +239,13 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
             }
             val cancel: () -> Unit = { cancelled = true; operation?.cancel() }
             cancel
+        }
+        library.deleteLocal = { file, done ->
+            val sn = sdk.connectedDevice?.serialNumber
+            if (sn == null) done("连接已失效")
+            else sdk.files.deleteLocalAudio(sn, if (file.mode == 1) WaveNoteRecordMode.NOTE else WaveNoteRecordMode.CALL, file.name) { error ->
+                done(error?.let(::errorText))
+            }
         }
     }
 

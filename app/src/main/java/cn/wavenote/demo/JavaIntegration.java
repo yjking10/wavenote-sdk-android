@@ -15,7 +15,12 @@ public final class JavaIntegration {
     public static void localAudio(WaveNoteSDK sdk, String sn, WaveNoteRecordMode mode, String name, WaveNoteCompletion<WaveNoteLocalAudio> completion) {
         sdk.getFiles().findLocalAudio(sn, mode, name, completion);
     }
-    public static WaveNoteOperation download(WaveNoteSDK sdk, WaveNoteFile file, boolean resume, WaveNoteCompletion<WaveNoteLocalAudio> completion) {
-        return sdk.getFiles().downloadToStorage(file, WaveNoteTransferTransport.BLUETOOTH, resume, completion);
+    /** 仅删除 SDK 托管的本地音频和续传数据，不删除设备文件。 */
+    public static void deleteLocalAudio(WaveNoteSDK sdk, String sn, WaveNoteRecordMode mode, String name, WaveNoteControlCompletion completion) {
+        sdk.getFiles().deleteLocalAudio(sn, mode, name, completion);
+    }
+    /** deleteSource=false 保留设备文件；true 时本地完成后请求删除，删除失败会保留本地音频。 */
+    public static WaveNoteOperation download(WaveNoteSDK sdk, WaveNoteFile file, boolean resume, boolean deleteSource, WaveNoteCompletion<WaveNoteLocalAudio> completion) {
+        return sdk.getFiles().downloadToStorage(file, WaveNoteTransferTransport.BLUETOOTH, resume, deleteSource, completion);
     }
 }

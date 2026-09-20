@@ -52,3 +52,15 @@ adb logcat -s WaveNoteSDK:V WaveNoteDemo:V '*:S'
 如果 APP 在 SDK 写出正式 Ogg 后、持久化完成索引前退出，下次查询或托管下载时，SDK 会校验该 Ogg的页CRC、序号、流标识、Opus头、时长、EOS和对应原始字节数；通过后原子补写完成索引，复用原文件，不重新下载。校验失败保留文件和任务并报错；补写索引失败也保留任务，供下次重试。此检查针对SDK生成的Ogg结构，不等同于完整音频解码或设备内容哈希验证。
 
 APP 重启后可直接调用 `files.findLocalAudio(serialNumber, mode, fileName, completion)`，无需 BLE 连接。只查询当前配置用户；无匹配返回空结果，损坏返回错误。同名文件大小变化时先清理旧内容，再以同一目标名重新下载；新下载期间不保留旧内容。原 `download` 指定路径接口仍可使用，但不会纳入托管查询。
+# R202 development authentication
+
+The Demo contains a development-only `DEV_CLOUD_PRIVATE_KEY_PKCS8_B64` for the matching development firmware. It exists solely to exercise 1001 in local integration. Production apps must obtain the SN signature and the account key pair from an authenticated cloud service; never ship a production cloud private key or log private-key material.
+
+If an R202 development device was previously pinned to an existing user key pair, put that pair only in the ignored `android/Demo/local.properties` before building the Demo:
+
+```properties
+demoR202UserPublicKeyB64=…
+demoR202UserPrivateKeyPkcs8B64=…
+```
+
+This is a temporary local migration path: it compiles the development key into the local **Debug** APK and must never be used for production credentials. Release builds always omit these values. Omit both properties to use the Demo's normal per-account development key pair.

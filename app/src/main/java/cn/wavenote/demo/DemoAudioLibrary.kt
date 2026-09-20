@@ -18,6 +18,7 @@ class DemoAudioLibrary {
     var count: (Int, (Int?, String?) -> Unit) -> Unit = { _, _ -> }
     var page: (Int, Int, (List<DemoAudioFile>?, String?) -> Unit) -> Unit = { _, _, _ -> }
     var download: (DemoAudioFile, (Long) -> Unit, (String?, String?) -> Unit) -> (() -> Unit) = { _, _, _ -> {} }
+    var deleteLocal: (DemoAudioFile, (String?) -> Unit) -> Unit = { _, completion -> completion("删除本地音频未配置") }
     var changed: (() -> Unit)? = null
     var finished: (() -> Unit)? = null
     var completedRow: ((DemoAudioRow) -> Unit)? = null
@@ -136,6 +137,16 @@ class DemoAudioLibrary {
         if (!busy) return
         val row = rows.firstOrNull { it.file.key == file.key && it.localPath == null } ?: return
         row.status = text; message = text; changed?.invoke()
+    }
+    fun deleteLocalAudio(file: DemoAudioFile, completion: (String?) -> Unit) {
+        if (busy) { completion("文件同步中，请稍候"); return }
+        deleteLocal(file) { error ->
+            if (error == null) {
+                rows = rows.filterNot { it.file.key == file.key }
+                changed?.invoke()
+            }
+            completion(error)
+        }
     }
     fun converting(bytes: Long, total: Long) {
         if (!busy) return
