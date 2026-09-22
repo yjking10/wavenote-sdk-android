@@ -14,8 +14,7 @@ class DemoIdentityProvider(context: Context) : WaveNoteIdentityProvider {
     companion object {
         // DEV ONLY. This reference key may only be used with development firmware.
         // Production signing must happen in the cloud; never ship a production private key in an APK.
-        private const val DEV_CLOUD_PRIVATE_KEY_PKCS8_B64 =
-        
+        private val demoR202CloudPrivateKeyPkcs8B64 = BuildConfig.DEMO_R202_CLOUD_PRIVATE_KEY_PKCS8_B64.takeIf(String::isNotBlank)
 
     }
     private val prefs = context.getSharedPreferences("demo.ownership", Context.MODE_PRIVATE)
@@ -39,7 +38,8 @@ class DemoIdentityProvider(context: Context) : WaveNoteIdentityProvider {
         // Never embed a production cloud private key in an APK or write key material to logs.
         try {
             val factory = KeyFactory.getInstance("RSA")
-            val privateKey = factory.generatePrivate(PKCS8EncodedKeySpec(Base64.getDecoder().decode(DEV_CLOUD_PRIVATE_KEY_PKCS8_B64)))
+
+            val privateKey = factory.generatePrivate(PKCS8EncodedKeySpec(Base64.getDecoder().decode(demoR202CloudPrivateKeyPkcs8B64)))
             val signature = Signature.getInstance("SHA256withRSA").apply { initSign(privateKey); update(serialNumber.toByteArray(Charsets.US_ASCII)) }.sign()
             completion.complete(WaveNoteDeviceSignature(Base64.getEncoder().encodeToString(signature)), null)
         } catch (_: Exception) { completion.complete(null, WaveNoteError(WaveNoteErrorCode.IDENTITY_PROVIDER_UNAVAILABLE, "demoR202DeviceSignature")) }
