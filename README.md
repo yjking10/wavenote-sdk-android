@@ -1,6 +1,6 @@
 # wavenote-sdk-android
 
-WaveNote Android 原生 Demo，演示扫描绑定连接、设备设置、空闲时文件同步、已完成/总文件数、逐文件进度及原生音频播放。使用 **0.2.0-alpha.1** SDK 候选版本。
+WaveNote Android 原生 Demo，演示扫描绑定连接、设备设置、空闲时文件同步、已完成/总文件数、逐文件进度及原生音频播放。使用 **0.2.0** SDK 版本。
 
 ## 快速集成
 

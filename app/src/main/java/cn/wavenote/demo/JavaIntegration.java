@@ -6,7 +6,7 @@ public final class JavaIntegration {
     public static WaveNoteSDK configure(Context context, String user, WaveNoteIdentityProvider provider, WaveNoteSDKDelegate callback) {
         WaveNoteSDK sdk = WaveNoteSDK.getInstance(context);
         sdk.setDelegate(callback);
-        sdk.configure(new WaveNoteSDKConfiguration(user, false, WaveNoteReconnectPolicy.NONE, provider));
+        sdk.configure(new WaveNoteSDKConfiguration(user, false, WaveNoteReconnectPolicy.NONE, provider, false));
         return sdk;
     }
     public static void clearForLogout(WaveNoteSDK sdk) { sdk.clearConfiguration(); }

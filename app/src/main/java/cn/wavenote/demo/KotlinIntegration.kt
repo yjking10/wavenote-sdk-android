@@ -7,7 +7,7 @@ object KotlinIntegration {
     fun configure(context: Context, user: String, provider: WaveNoteIdentityProvider, delegate: WaveNoteSDKDelegate): WaveNoteSDK {
         return WaveNoteSDK.getInstance(context).also {
             it.delegate = delegate
-            it.configure(WaveNoteSDKConfiguration(user, enableAutoReconnect = false, identityProvider = provider))
+            it.configure(WaveNoteSDKConfiguration(user, enableAutoReconnect = false, identityProvider = provider, enableLiveAudio = false))
         }
     }
     fun clearForLogout(sdk: WaveNoteSDK) = sdk.clearConfiguration()
