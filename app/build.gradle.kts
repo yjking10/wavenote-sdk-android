@@ -14,7 +14,7 @@ android {
     namespace = "cn.wavenote.demo"
     compileSdk = 36
     defaultConfig {
-        applicationId = "cn.wavenote.demo"; minSdk = 29; targetSdk = 36; versionCode = 2; versionName = "0.2.0"
+        applicationId = "cn.wavenote.demo"; minSdk = 29; targetSdk = 36; versionCode = 3; versionName = "0.2.1"
         buildConfigField("String", "DEMO_R202_CLOUD_PRIVATE_KEY_PKCS8_B64", "\"\"")
 
         buildConfigField("String", "DEMO_R202_USER_PUBLIC_KEY_B64", "\"\"")
@@ -39,7 +39,7 @@ dependencies {
     if (providers.gradleProperty("localAar").getOrElse("true") == "true") {
         implementation(files("libs/wavenote-sdk.aar"))
         implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
-    } else implementation("cn.wavenote:wavenote-sdk:${providers.gradleProperty("sdkVersion").getOrElse("0.2.0")}")
+    } else implementation("cn.wavenote:wavenote-sdk:${providers.gradleProperty("sdkVersion").getOrElse("0.2.1")}")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }
