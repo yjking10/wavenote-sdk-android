@@ -53,6 +53,17 @@ class DemoAudioTest {
         assertEquals(7,json.getInt("received")); assertEquals("同步完成",json.getString("status"))
         assertEquals("/one.ogg",json.getString("localPath")); assertEquals("one.opus",json.getJSONObject("file").getString("name"))
     }
+    @Test fun transportPreparationRunsAfterListsAndBeforeFirstDownload() {
+        val lib = configured(); val calls = mutableListOf<String>(); var prepared: ((String?) -> Unit)? = null
+        lib.count = { mode, done -> calls += "count$mode"; done(if (mode == 1) 1 else 0, null) }
+        lib.page = { mode, _, done -> calls += "page$mode"; done(listOf(file), null) }
+        lib.prepareDownloads = { done -> calls += "prepare"; prepared = done }
+        lib.download = { _, _, _ -> calls += "download"; {} }
+        assertTrue(lib.start())
+        assertEquals(listOf("count1", "page1", "count2", "prepare"), calls)
+        prepared!!(null)
+        assertEquals("download", calls.last())
+    }
     @Test fun positionFailureSkipsFileUntilReconnect() {
         val lib = configured(); val downloads = mutableListOf<String>()
         lib.count = { mode, done -> done(if (mode == 1) 2 else 0, null) }
@@ -69,6 +80,15 @@ class DemoAudioTest {
         assertTrue(lib.message.contains("失败 1"))
         assertTrue(lib.start())
         assertEquals(listOf("one.opus", "two.opus", "two.opus"), downloads)
+    }
+    @Test fun manualStopShowsSavedCheckpointInsteadOfCancellationError() {
+        val lib = configured(); var complete: ((String?, String?) -> Unit)? = null
+        lib.download = { _, _, done -> complete = done; {} }
+        assertTrue(lib.start())
+        lib.stop(); complete!!(null, "同步已取消")
+        assertFalse(lib.busy)
+        assertEquals("同步已停止，断点已保留", lib.rows[0].status)
+        assertEquals("同步已停止，可点击重新同步", lib.message)
     }
     @Test fun recordingPausedAndUnknownNeverList() {
         for (state in listOf(0, 2, 3)) {

@@ -17,6 +17,8 @@ class DemoAudioLibrary {
     var readRecording: ((DemoRecordingValue?, String?) -> Unit) -> Unit = {}
     var count: (Int, (Int?, String?) -> Unit) -> Unit = { _, _ -> }
     var page: (Int, Int, (List<DemoAudioFile>?, String?) -> Unit) -> Unit = { _, _, _ -> }
+    /** 列表通过 BLE 读取完成后、首个下载开始前切换传输通道。 */
+    var prepareDownloads: ((String?) -> Unit) -> Unit = { it(null) }
     var download: (DemoAudioFile, (Long) -> Unit, (String?, String?) -> Unit) -> (() -> Unit) = { _, _, _ -> {} }
     var deleteLocal: (DemoAudioFile, (String?) -> Unit) -> Unit = { _, completion -> completion("删除本地音频未配置") }
     var changed: (() -> Unit)? = null
@@ -92,7 +94,15 @@ class DemoAudioLibrary {
         if (files.size == expected) {
             collected.addAll(files)
             if (mode == 1) listMode(2)
-            else { val old = rows.associateBy { it.file.key }; rows = collected.map { old[it.key] ?: DemoAudioRow(it) }; changed?.invoke(); downloadNext(0) }
+            else {
+                val old = rows.associateBy { it.file.key }; rows = collected.map { old[it.key] ?: DemoAudioRow(it) }; changed?.invoke()
+                val ticket = next()
+                prepareDownloads { error ->
+                    if (accept(ticket) && proceed()) {
+                        if (error != null) end(error) else downloadNext(0)
+                    }
+                }
+            }
             return
         }
         val ticket = next()
@@ -123,6 +133,10 @@ class DemoAudioLibrary {
                 cancelDownload = null
                 rows[index].kilobytesPerSecond = null
                 if (error != null) {
+                    if (stopRequested && error == "同步已取消") {
+                        rows[index].status = "同步已停止，断点已保留"
+                        end("同步已停止，可点击重新同步"); return@download
+                    }
                     if (error == "downloadPositionMismatch" && !stopRequested && !isRecording) {
                         failedThisConnection.add(file.key); rows[index].status = "同步失败，断点已保留"
                         changed?.invoke(); downloadNext(index + 1)

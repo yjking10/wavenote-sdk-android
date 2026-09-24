@@ -180,9 +180,10 @@ class MainActivity : Activity() {
         row(if (model.library.busy) "停止同步" else "重新同步文件", "${model.library.syncCountText}\n${model.library.message}", enabled = model.library.busy || !model.flow.busy) {
             if (model.library.busy) model.library.stop() else model.syncFiles()
         }
+        row(model.fastTransferTitle, model.fastTransferDetail, enabled = model.fastTransferActive || model.flow.ready) { requestFastTransfer() }
         model.library.rows.forEach(::audioFileRow)
         if (model.player.message.isNotEmpty()) note(model.player.message)
-        note("音频仅保存在本机。长按已完成文件可删除本地音频。下载中停止同步可能断开蓝牙，需要重新连接。")
+        note("音频仅保存在本机。长按已完成文件可删除本地音频。下载中停止同步会保留断点；若设备未确认停止，蓝牙可能断开，需重新连接。")
     }
     /** 与 iOS 文件行一致：左侧文件信息，右侧播放按钮、时间和细进度条。 */
     private fun audioFileRow(item: DemoAudioRow) {
@@ -257,12 +258,21 @@ class MainActivity : Activity() {
         val missing = permissions.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 1) else model.scan()
     }
+    private fun requestFastTransfer() {
+        if (model.fastTransferActive) { model.toggleFastTransfer(); return }
+        val permission = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.NEARBY_WIFI_DEVICES else Manifest.permission.ACCESS_FINE_LOCATION
+        if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) model.toggleFastTransfer()
+        else requestPermissions(arrayOf(permission), 2)
+    }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 1) {
             if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) { model.status = "权限已授予，请点击开始扫描。" }
             else model.status = "蓝牙权限未授予，请点击蓝牙状态前往系统设置，允许权限后重试。"
             render()
+        } else if (requestCode == 2) {
+            if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) model.toggleFastTransfer()
+            else { model.status = "Wi-Fi 快传权限未授予，请前往系统设置允许后重试。"; render() }
         }
     }
     private fun info(title: String, text: String) { infoTitle = title; infoText = text; navigate("info") }
