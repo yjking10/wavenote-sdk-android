@@ -111,7 +111,7 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
         android.util.Log.i("WaveNoteDemo", "SDK version=${WaveNoteSDK.SDK_VERSION}")
         // Demo 在 Debug / Release 均默认输出 SDK 脱敏日志到 Logcat。
         sdk.openLog(true)
-        sdk.configure(WaveNoteSDKConfiguration("demo-user", enableAutoReconnect = false, identityProvider = identity, enableLiveAudio = true))
+        sdk.configure(WaveNoteSDKConfiguration("demo-user", enableAutoReconnect = true, identityProvider = identity, enableLiveAudio = true))
     }
     fun dispose() { changed = null; resetAudio(); player.dispose(); sdk.files.delegate = null; sdk.wifi.delegate = null; handler.removeCallbacksAndMessages(null); sdk.disconnectDevice(); sdk.delegate = null; sdk.deviceSettings.delegate = null; sdk.recording.delegate = null }
     fun scan() {

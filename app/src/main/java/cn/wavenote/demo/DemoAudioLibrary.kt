@@ -96,6 +96,7 @@ class DemoAudioLibrary {
             if (mode == 1) listMode(2)
             else {
                 val old = rows.associateBy { it.file.key }; rows = collected.map { old[it.key] ?: DemoAudioRow(it) }; changed?.invoke()
+                if (rows.isEmpty()) { end("设备暂无录音文件"); return }
                 val ticket = next()
                 prepareDownloads { error ->
                     if (accept(ticket) && proceed()) {

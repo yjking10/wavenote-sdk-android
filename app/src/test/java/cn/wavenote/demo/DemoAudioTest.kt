@@ -134,9 +134,15 @@ class DemoAudioTest {
         lib.start(); lib.invalidate(); done!!(stopped, null); assertFalse(lib.busy)
     }
     @Test fun emptyModesAndZeroSizeCannotPlay() {
-        val lib = configured(); lib.count = { _, done -> done(0, null) }; lib.download = { _, _, _ -> fail(); {} }
+        val lib = configured(); val calls = mutableListOf<String>()
+        lib.count = { mode, done -> calls += "count$mode"; done(0, null) }
+        lib.page = { _, _, _ -> fail("must not request an empty page") }
+        lib.prepareDownloads = { fail("must not enable Wi-Fi without files") }
+        lib.download = { _, _, _ -> fail(); {} }
         lib.start(); assertEquals("设备暂无录音文件", lib.message)
+        assertEquals(listOf("count1", "count2"), calls); assertFalse(lib.busy)
         lib.count = { mode, done -> done(if (mode == 1) 1 else 0, null) }; lib.page = { _, _, done -> done(listOf(DemoAudioFile("empty", 0, 1)), null) }
+        lib.prepareDownloads = { it(null) }
         lib.start(); assertNull(lib.rows.first().localPath); assertFalse(lib.busy)
     }
     @Test fun clockUsesTimestampAndPausesWithoutCountingTimeTwice() {
