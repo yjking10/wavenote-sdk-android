@@ -23,11 +23,96 @@
 ```kotlin
 dependencies {
     implementation(files("libs/wavenote-sdk.aar"))
+    implementation(files("libs/wavenote-audio-engine-1.0.0.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
+    // WaveNote Audio Engine 运行时依赖
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-common:1.11.1")
+    implementation("androidx.media3:media3-extractor:1.11.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }
 ```
 
 Demo 的 [AndroidManifest.xml](app/src/main/AndroidManifest.xml) 可作为权限声明参考；仍须在运行时向用户请求相应权限。
+
+## Audio Engine：本地音频处理
+
+Demo 已引入 `wavenote-audio-engine-1.0.0.aar`，用于处理 `downloadToStorage` 返回的已完成本地音频。它与设备传输解耦，不能播放正在下载、已取消或不完整的文件。
+
+核心能力包括：
+
+- 单文件播放：准备、播放/暂停/停止、跳转、音量（`0f..1f`）、倍速（`0.5f..2f`）和单曲循环；播放器同时只管理一个本地文件。
+- `events` 事件流：播放状态、毫秒级位置和时长、播放完成、系统中断、降噪准备/就绪/绕过和不可恢复错误。
+- 实时降噪：提供 `OFF`、`LIGHT`、`BALANCED`、`STRONG` 四档；切换是异步的，应根据事件更新 UI。
+- 离线降噪：将本地音频渲染为新的 WAV 文件；Demo 将结果先写入缓存文件，再通过 Storage Access Framework 写入用户选择的位置。
+
+以下 Kotlin 示例展示 Demo 使用的播放和实时降噪方式。播放器与 `events` 收集共用受控协程；宿主销毁时应取消该协程并调用 `close()`。不要在主线程执行文件拷贝等阻塞 I/O。
+
+```kotlin
+import android.content.Context
+import cn.wavenote.audio.player.NoiseSuppressionLevel
+import cn.wavenote.audio.player.PlayerEvent
+import cn.wavenote.audio.player.WaveNoteAudioPlayer
+import cn.wavenote.sdk.WaveNoteLocalAudio
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+
+class LocalAudioController(context: Context) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val player = WaveNoteAudioPlayer(context.applicationContext)
+
+    init {
+        scope.launch {
+            player.events.collect { event ->
+                when (event) {
+                    is PlayerEvent.PositionChanged ->
+                        renderProgress(event.positionMilliseconds, event.durationMilliseconds)
+                    is PlayerEvent.Completed -> showCompleted()
+                    is PlayerEvent.NoiseSuppressionBypassed -> showNoiseSuppressionUnavailable()
+                    is PlayerEvent.FatalError -> showPlaybackError()
+                    else -> Unit
+                }
+            }
+        }
+    }
+
+    fun open(audio: WaveNoteLocalAudio) {
+        scope.launch {
+            runCatching {
+                player.prepare(audio.file)
+                player.setRate(1.25f)
+                player.setNoiseSuppressionLevel(NoiseSuppressionLevel.BALANCED)
+                player.play()
+            }.onFailure(::showError)
+        }
+    }
+
+    fun seekTo(milliseconds: Long) {
+        scope.launch { player.seek(milliseconds) }
+    }
+
+    fun pause() {
+        scope.launch { player.pause() }
+    }
+
+    fun close() {
+        scope.cancel()
+        player.close()
+    }
+
+    private fun renderProgress(position: Long, duration: Long) = Unit
+    private fun showCompleted() = Unit
+    private fun showNoiseSuppressionUnavailable() = Unit
+    private fun showPlaybackError() = Unit
+    private fun showError(error: Throwable) = Unit
+}
+```
+
+`WaveNoteLocalAudio.file` 仅在 SDK 已成功交付本地文件时使用。离线降噪导出和完整生命周期处理可参考 [DemoNativePlayer.kt](app/src/main/java/cn/wavenote/demo/DemoNativePlayer.kt)。
 
 ## 运行 Demo 的开发凭据
 
