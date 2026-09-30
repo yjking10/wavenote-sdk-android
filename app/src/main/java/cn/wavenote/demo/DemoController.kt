@@ -296,7 +296,7 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
                     else if (error != null) done(null, errorText(error))
                     else if (cached != null && cached.rawBytes == file.size) done(cached.file.path, null)
                     else {
-                        operation = sdk.files.downloadToStorage(WaveNoteFile(file.name, file.size, if (file.mode == 1) WaveNoteRecordMode.NOTE else WaveNoteRecordMode.CALL), transport = syncTransport, resume = true, deleteSource = true) { audio, failure ->
+                        operation = sdk.files.downloadToStorage(WaveNoteFile(file.name, file.size, if (file.mode == 1) WaveNoteRecordMode.NOTE else WaveNoteRecordMode.CALL), transport = syncTransport, resume = true, deleteSource = false) { audio, failure ->
                             if (audioSession == session) {
                                 logOggDuration(if (failure == null && audio != null) "completed" else if (failure?.errorCode == WaveNoteErrorCode.OPERATION_CANCELLED) "cancelled" else "failed")
                                 progressID = null; progressCallback = null; progressFile = null

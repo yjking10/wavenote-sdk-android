@@ -38,8 +38,13 @@ kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarg
 dependencies {
     if (providers.gradleProperty("localAar").getOrElse("true") == "true") {
         implementation(files("libs/wavenote-sdk.aar"))
+        implementation(files("libs/wavenote-audio-engine-1.0.0.aar"))
         implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
     } else implementation("cn.wavenote:wavenote-sdk:${providers.gradleProperty("sdkVersion").getOrElse("0.2.1")}")
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-common:1.11.1")
+    implementation("androidx.media3:media3-extractor:1.11.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }

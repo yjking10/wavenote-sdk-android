@@ -24,6 +24,7 @@ import android.widget.*
 // Demo 固定中文界面；Android 13+ 使用上方注册的原生返回回调。
 @SuppressLint("SetTextI18n")
 class MainActivity : Activity() {
+    companion object { private const val REQUEST_EXPORT_DENOISED = 3 }
     private lateinit var model: DemoController
     private var page = "home"
     private var draft = ""
@@ -42,10 +43,20 @@ class MainActivity : Activity() {
     private var nearbyPlaceholder: TextView? = null
     private var playbackTime: TextView? = null
     private var playbackProgress: ProgressBar? = null
+    private var playerElapsed: TextView? = null
+    private var playerDuration: TextView? = null
+    private var playerProgress: SeekBar? = null
+    private var exportProgress: ProgressBar? = null
+    private var playerSource: String? = null
+    private var playerFileName = ""
     private fun updatePlaybackProgress() {
         playbackTime?.text = model.player.timeText
         playbackProgress?.progress = (model.player.fraction * 1000).toInt()
         playbackProgress?.contentDescription = "播放进度 ${model.player.timeText}"
+        playerElapsed?.text = DemoRecordingClock.text(model.player.position / 1_000)
+        playerDuration?.text = DemoRecordingClock.text(model.player.duration / 1_000)
+        playerProgress?.let { if (!it.isPressed) it.progress = (model.player.fraction * 1000).toInt() }
+        exportProgress?.progress = (model.player.exportProgress * 1000).toInt()
     }
     private val timer = android.os.Handler(android.os.Looper.getMainLooper())
     // 广播及传输回调会密集到达，合并刷新，避免为每个回调重建整页并挤占触摸处理。
@@ -60,7 +71,7 @@ class MainActivity : Activity() {
         model = DemoController(applicationContext)
         model.player.progressChanged = { updatePlaybackProgress() }
         model.changed = {
-            if (!model.flow.ready && page != "home") { page = "home"; dialog?.dismiss(); dialog = null }
+            if (!model.flow.ready && page != "home") { page = "home"; playerSource = null; model.player.stop(); dialog?.dismiss(); dialog = null }
             requestRender()
         }
         if (Build.VERSION.SDK_INT >= 33) onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) { back() }
@@ -71,7 +82,7 @@ class MainActivity : Activity() {
     override fun onDestroy() { renderGate.close(); timer.removeCallbacksAndMessages(null); model.dispose(); super.onDestroy() }
     @SuppressLint("GestureBackNavigation")
     @Deprecated("Compatibility with Android 10–12") override fun onBackPressed() { back() }
-    private fun back() { when (page) { "home" -> finish(); "settings", "recording" -> { page = "home"; render() }; else -> { page = "settings"; render() } } }
+    private fun back() { when (page) { "home" -> finish(); "settings", "recording", "player" -> { if (page == "player") { model.player.stop(); playerSource = null }; page = "home"; render() }; else -> { page = "settings"; render() } } }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private fun label(text: String, size: Float = 16f, color: Int = ink): TextView = TextView(this).apply {
         this.text = text; textSize = size; setTextColor(color); setPadding(dp(20), dp(12), dp(20), dp(12))
@@ -97,7 +108,7 @@ class MainActivity : Activity() {
         nearbyList = null; nearbyRows.clear(); nearbyPlaceholder = null
         val oldScroll = if (::scroll.isInitialized && lastPage == page) scroll.scrollY else 0
         lastPage = page
-        playbackTime = null; playbackProgress = null
+        playbackTime = null; playbackProgress = null; playerElapsed = null; playerDuration = null; playerProgress = null; exportProgress = null
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(242, 244, 246)) }
         root.setOnApplyWindowInsetsListener { v, insets ->
             val bars = if (Build.VERSION.SDK_INT >= 30) insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime()) else null
@@ -107,7 +118,7 @@ class MainActivity : Activity() {
         }
         val nav = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(Color.WHITE) }
         if (page != "home") nav.addView(Button(this).apply { text = "返回"; setOnClickListener { back() } })
-        val title = when (page) { "home" -> if (model.flow.ready) model.sdk.connectedDevice?.serialNumber ?: "WaveNote" else "WaveNote"; "recording" -> "当前录音"; "settings" -> "设备设置"; "mic" -> "麦克风增益"; "vcs" -> "振动传感器增益"; "power" -> "自动关机"; else -> infoTitle }
+        val title = when (page) { "home" -> if (model.flow.ready) model.sdk.connectedDevice?.serialNumber ?: "WaveNote" else "WaveNote"; "recording" -> "当前录音"; "player" -> "播放器"; "settings" -> "设备设置"; "mic" -> "麦克风增益"; "vcs" -> "振动传感器增益"; "power" -> "自动关机"; else -> infoTitle }
         nav.addView(label(title, if (page == "home" && model.flow.ready) 14f else 20f).apply {
             typeface = if (page == "home" && model.flow.ready) Typeface.MONOSPACE else Typeface.DEFAULT_BOLD
             if (page == "home" && model.flow.ready) { setTextColor(accent); contentDescription = "已连接设备，点击设置：$title"; setOnClickListener { navigate("settings"); model.refresh() } }
@@ -116,7 +127,7 @@ class MainActivity : Activity() {
         scroll = ScrollView(this).apply { isFillViewport = true }
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(body); root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f)); setContentView(root)
-        when (page) { "home" -> home(); "recording" -> recording(); "settings" -> settings(); "mic", "vcs" -> gain(); "power" -> power(); else -> note(infoText) }
+        when (page) { "home" -> home(); "recording" -> recording(); "player" -> player(); "settings" -> settings(); "mic", "vcs" -> gain(); "power" -> power(); else -> note(infoText) }
         scroll.post { scroll.scrollTo(0, oldScroll) }; root.requestApplyInsets()
     }
     private fun home() {
@@ -185,15 +196,14 @@ class MainActivity : Activity() {
         if (model.player.message.isNotEmpty()) note(model.player.message)
         note("音频仅保存在本机。长按已完成文件可删除本地音频。下载中停止同步会保留断点；若设备未确认停止，蓝牙可能断开，需重新连接。")
     }
-    /** 与 iOS 文件行一致：左侧文件信息，右侧播放按钮、时间和细进度条。 */
+    /** 已完成文件从列表进入独立播放器，避免播放状态挤占同步列表。 */
     private fun audioFileRow(item: DemoAudioRow) {
         val path = item.localPath
-        val active = path != null && model.player.path == path && !model.player.preparing
         val percent = if (item.file.size > 0) (item.received.toDouble() / item.file.size * 100).toInt() else 0
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.WHITE); setPadding(dp(20), dp(14), dp(20), dp(14))
-            minimumHeight = dp(if (active) 112 else 74)
+            minimumHeight = dp(74)
         }
         if (path != null && !model.library.busy) {
             container.setOnLongClickListener {
@@ -210,28 +220,18 @@ class MainActivity : Activity() {
         details.addView(label("${if (item.file.mode == 1) "Note" else "Call"} · ${item.status} · $percent%${item.speedText}\n${android.text.format.Formatter.formatFileSize(this, item.received)} / ${android.text.format.Formatter.formatFileSize(this, item.file.size)}", 13f, muted).apply { setPadding(0, 0, 0, 0) })
         container.addView(details, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(12) })
         val accessory = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-        container.addView(accessory, LinearLayout.LayoutParams(dp(if (active) 142 else if (path != null) 64 else 80), -2))
+        container.addView(accessory, LinearLayout.LayoutParams(dp(if (path != null) 64 else 80), -2))
         if (path != null) {
             accessory.addView(Button(this, null, android.R.attr.borderlessButtonStyle).apply {
-                text = if (active && model.player.playing) "暂停" else "播放"
+                text = "播放"
                 textSize = 16f; isAllCaps = false; minWidth = 0; minimumWidth = 0
                 minHeight = dp(48); minimumHeight = dp(48); setPadding(0, 0, 0, 0)
                 setTextColor(android.content.res.ColorStateList(
                     arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()), intArrayOf(muted, accent)))
-                isEnabled = !model.player.preparing
+                isEnabled = !model.library.busy
                 contentDescription = "$text ${item.file.name}"
-                setOnClickListener { model.player.toggle(path) }
+                setOnClickListener { openPlayer(path, item.file.name) }
             }, LinearLayout.LayoutParams(-1, -2))
-            if (active) {
-                playbackTime = label(model.player.timeText, 11f, muted).apply {
-                    typeface = Typeface.MONOSPACE; gravity = Gravity.CENTER
-                    setPadding(0, 0, 0, 0)
-                }
-                accessory.addView(playbackTime, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
-                playbackProgress = audioProgressBar()
-                accessory.addView(playbackProgress, LinearLayout.LayoutParams(-1, dp(4)).apply { topMargin = dp(6) })
-                updatePlaybackProgress()
-            }
         } else {
             accessory.addView(audioProgressBar().apply {
                 progress = percent * 10; contentDescription = "下载进度 $percent% ${item.file.name}"
@@ -240,10 +240,67 @@ class MainActivity : Activity() {
         body.addView(container)
         body.addView(View(this).apply { setBackgroundColor(Color.rgb(232, 236, 239)) }, LinearLayout.LayoutParams(-1, dp(1)))
     }
+    private fun openPlayer(source: String, fileName: String) {
+        playerSource = source
+        playerFileName = fileName
+        page = "player"
+        model.player.load(source)
+        render()
+    }
     private fun audioProgressBar() = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
         max = 1000
         progressTintList = android.content.res.ColorStateList.valueOf(accent)
         progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.rgb(225, 229, 234))
+    }
+    private fun player() {
+        val source = playerSource
+        if (source == null) { page = "home"; render(); return }
+        if (model.player.path != source) model.player.load(source)
+        section(playerFileName)
+        note("实时播放可选择降噪等级；导出会在后台生成降噪 WAV，原始录音不会被修改。")
+        val seek = SeekBar(this).apply {
+            max = 1000
+            progress = (model.player.fraction * 1000).toInt()
+            contentDescription = "播放进度 ${model.player.timeText}"
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {}
+                override fun onStartTrackingTouch(bar: SeekBar?) {}
+                override fun onStopTrackingTouch(bar: SeekBar?) { model.player.seek(model.player.duration * (bar?.progress ?: 0) / 1000) }
+            })
+        }
+        playerProgress = seek
+        body.addView(seek, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(20), dp(16), dp(20), 0) })
+        val times = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        playerElapsed = label(DemoRecordingClock.text(model.player.position / 1_000), 14f, muted).apply { typeface = Typeface.MONOSPACE }
+        playerDuration = label(DemoRecordingClock.text(model.player.duration / 1_000), 14f, muted).apply { typeface = Typeface.MONOSPACE; gravity = Gravity.END }
+        times.addView(playerElapsed, LinearLayout.LayoutParams(0, -2, 1f)); times.addView(playerDuration, LinearLayout.LayoutParams(0, -2, 1f)); body.addView(times)
+        val controls = LinearLayout(this).apply { gravity = Gravity.CENTER }
+        controls.addView(Button(this).apply { text = "后退 15 秒"; isEnabled = !model.player.preparing; setOnClickListener { model.player.skip(-15) } })
+        controls.addView(Button(this).apply { text = if (model.player.playing) "暂停" else "播放"; isEnabled = !model.player.preparing && !model.player.exporting; setOnClickListener { model.player.toggle() } })
+        controls.addView(Button(this).apply { text = "前进 15 秒"; isEnabled = !model.player.preparing; setOnClickListener { model.player.skip(15) } })
+        body.addView(controls)
+        section("降噪等级")
+        val levels = listOf("关闭" to cn.wavenote.audio.player.NoiseSuppressionLevel.OFF, "轻度" to cn.wavenote.audio.player.NoiseSuppressionLevel.LIGHT, "均衡" to cn.wavenote.audio.player.NoiseSuppressionLevel.BALANCED, "强力" to cn.wavenote.audio.player.NoiseSuppressionLevel.STRONG)
+        val choices = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL; gravity = Gravity.CENTER }
+        levels.forEach { (title, level) -> choices.addView(RadioButton(this).apply { text = title; isChecked = model.player.noiseLevel == level; isEnabled = !model.player.exporting; setOnClickListener { model.player.setNoiseSuppressionLevel(level) } }) }
+        body.addView(choices)
+        val export = Button(this).apply {
+            text = if (model.player.exporting) "正在导出降噪音频…" else "导出降噪 WAV"
+            isEnabled = !model.player.preparing && !model.player.exporting && model.player.noiseLevel != cn.wavenote.audio.player.NoiseSuppressionLevel.OFF
+            setOnClickListener { createDenoisedDocument() }
+        }
+        body.addView(export, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(20), dp(12), dp(20), 0) })
+        exportProgress = audioProgressBar().apply { progress = (model.player.exportProgress * 1000).toInt(); visibility = if (model.player.exporting) View.VISIBLE else View.GONE }
+        body.addView(exportProgress, LinearLayout.LayoutParams(-1, dp(4)).apply { setMargins(dp(20), dp(4), dp(20), 0) })
+        note(model.player.message)
+    }
+    private fun createDenoisedDocument() {
+        val name = java.io.File(playerFileName).nameWithoutExtension.ifBlank { "recording" } + "-denoised.wav"
+        startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "audio/wav"
+            putExtra(Intent.EXTRA_TITLE, name)
+        }, REQUEST_EXPORT_DENOISED)
     }
     private fun recording() {
         section("当前录音")
@@ -273,6 +330,13 @@ class MainActivity : Activity() {
         } else if (requestCode == 2) {
             if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) model.toggleFastTransfer()
             else { model.status = "Wi-Fi 快传权限未授予，请前往系统设置允许后重试。"; render() }
+        }
+    }
+    @Deprecated("Activity result API compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_EXPORT_DENOISED && resultCode == RESULT_OK) {
+            data?.data?.let(model.player::exportDenoised)
         }
     }
     private fun info(title: String, text: String) { infoTitle = title; infoText = text; navigate("info") }
