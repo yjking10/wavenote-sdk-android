@@ -46,7 +46,6 @@ class DemoNativePlayer(private val context: Context) {
 
     init {
         scope.launch { player.events.collect(::apply) }
-        setNoiseSuppressionLevel(NoiseSuppressionLevel.BALANCED)
     }
 
     /** 准备音频，成功后由播放器页显式点击开始播放。 */
@@ -66,7 +65,10 @@ class DemoNativePlayer(private val context: Context) {
         scope.launch {
             // 必须在同一协程内先停止旧会话，避免旧 stop 与新 prepare 交错。
             runCatching { player.stop() }
-            runCatching { player.prepare(input) }
+            runCatching {
+                player.prepare(input)
+                player.setNoiseSuppressionLevel(noiseLevel)
+            }
                 .onSuccess { if (path == source) { preparing = false; message = "准备就绪"; changed?.invoke() } }
                 .onFailure { if (path == source) { preparing = false; message = "无法准备此音频，请检查文件完整性或剩余空间。"; changed?.invoke() } }
         }
