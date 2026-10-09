@@ -365,6 +365,13 @@ class MainActivity : Activity() {
         row("麦克风增益", s?.microphoneGain?.toString() ?: "未知", enabled = idle) { draft = s?.microphoneGain?.toString() ?: ""; navigate("mic") }
         row("振动传感器增益", s?.vibrationGain?.toString() ?: "未知", enabled = idle) { draft = s?.vibrationGain?.toString() ?: ""; navigate("vcs") }
         note("原始整数 0–255，数值不代表分贝或百分比。")
+        section("调试")
+        body.addView(Switch(this).apply {
+            text = "设备文件 Log · ${when (s?.deviceLog) { 0 -> "关闭"; 1 -> "打开"; else -> "未知" }}"
+            setPadding(dp(20), dp(16), dp(20), dp(16)); isChecked = s?.deviceLog == 1; isEnabled = idle && s?.deviceLog != null
+            setOnCheckedChangeListener { _, checked -> model.control { model.sdk.maintenance.setDeviceLogEnabled(checked, it) } }
+        })
+        note("查询 110 获取设备状态；开关发送 222 并回读确认。与 SDK 控制台日志独立。")
         section("连接管理")
         row("断开连接", enabled = idle, destructive = true) { model.disconnect() }
         row("解绑设备", enabled = idle, destructive = true) { confirm("解绑设备", "仅解除本机演示账户归属，不清空设备内容。") { model.unbind() } }

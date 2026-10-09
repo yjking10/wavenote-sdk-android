@@ -14,7 +14,7 @@ android {
     namespace = "cn.wavenote.demo"
     compileSdk = 36
     defaultConfig {
-        applicationId = "cn.wavenote.demo"; minSdk = 29; targetSdk = 36; versionCode = 3; versionName = "0.2.1"
+        applicationId = "cn.wavenote.demo"; minSdk = 29; targetSdk = 36; versionCode = 4; versionName = "0.2.2"
         buildConfigField("String", "DEMO_R202_CLOUD_PRIVATE_KEY_PKCS8_B64", "\"\"")
 
         buildConfigField("String", "DEMO_R202_USER_PUBLIC_KEY_B64", "\"\"")
@@ -40,7 +40,7 @@ dependencies {
         implementation(files("libs/wavenote-sdk.aar"))
         implementation(files("libs/wavenote-audio-engine-1.0.0.aar"))
         implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
-    } else implementation("cn.wavenote:wavenote-sdk:${providers.gradleProperty("sdkVersion").getOrElse("0.2.1")}")
+    } else implementation("cn.wavenote:wavenote-sdk:${providers.gradleProperty("sdkVersion").getOrElse("0.2.2")}")
     implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-common:1.11.1")
     implementation("androidx.media3:media3-extractor:1.11.1")

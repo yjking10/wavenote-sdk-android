@@ -142,7 +142,8 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
         val token = flow.beginSetting() ?: return
         status = "正在读取设备设置…"; changed?.invoke()
         val items = listOf(WaveNoteSetting.HARDWARE, WaveNoteSetting.BATTERY, WaveNoteSetting.CHARGING, WaveNoteSetting.STORAGE,
-            WaveNoteSetting.RECORDING, WaveNoteSetting.MICROPHONE_GAIN, WaveNoteSetting.VIBRATION_GAIN, WaveNoteSetting.AUTO_POWER_OFF)
+            WaveNoteSetting.RECORDING, WaveNoteSetting.MICROPHONE_GAIN, WaveNoteSetting.VIBRATION_GAIN, WaveNoteSetting.AUTO_POWER_OFF,
+            WaveNoteSetting.DEVICE_LOG)
         DemoReadSequence.run<WaveNoteSetting, WaveNoteError>(items, { flow.accepts(token) && flow.ready }, { item, done ->
             sdk.deviceSettings.query(item) { value, error ->
                 if (flow.accepts(token) && flow.ready) {
