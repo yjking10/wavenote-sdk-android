@@ -49,6 +49,13 @@ class MainActivity : Activity() {
     private var exportProgress: ProgressBar? = null
     private var playerSource: String? = null
     private var playerFileName = ""
+    private data class RowViews(val title: TextView, val value: TextView?)
+    private data class AudioFileViews(val detail: TextView, val progress: ProgressBar?)
+    private val transferRenderPolicy = DemoFileTransferRenderPolicy()
+    private var renderedTransferRows = emptyList<Pair<String, String?>>()
+    private var transferSyncRow: RowViews? = null
+    private var transferFastRow: RowViews? = null
+    private val transferFileRows = mutableMapOf<String, AudioFileViews>()
     private fun updatePlaybackProgress() {
         playbackTime?.text = model.player.timeText
         playbackProgress?.progress = (model.player.fraction * 1000).toInt()
@@ -89,13 +96,15 @@ class MainActivity : Activity() {
     }
     private fun section(text: String) { body.addView(label(text, 13f, accent).apply { typeface = Typeface.DEFAULT_BOLD; setPadding(dp(20), dp(26), dp(20), dp(8)) }) }
     private fun note(text: String) { body.addView(label(text, 13f, muted)) }
-    private fun row(title: String, value: String = "", enabled: Boolean = true, destructive: Boolean = false, action: (() -> Unit)? = null) {
+    private fun row(title: String, value: String = "", enabled: Boolean = true, destructive: Boolean = false, action: (() -> Unit)? = null): RowViews {
         val item = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.WHITE); minimumHeight = dp(58) }
-        item.addView(label(title, 16f, if (destructive) Color.rgb(169, 38, 47) else ink))
-        if (value.isNotEmpty()) item.addView(label(value, 14f, muted).apply { setPadding(dp(20), 0, dp(20), dp(14)) })
+        val titleView = label(title, 16f, if (destructive) Color.rgb(169, 38, 47) else ink)
+        item.addView(titleView)
+        val valueView = if (value.isNotEmpty()) label(value, 14f, muted).apply { setPadding(dp(20), 0, dp(20), dp(14)) }.also(item::addView) else null
         item.isEnabled = enabled; item.alpha = if (enabled) 1f else 0.55f
         if (action != null) { item.isClickable = true; item.setOnClickListener { if (enabled) action() } }
         body.addView(item); body.addView(View(this).apply { setBackgroundColor(Color.rgb(232, 236, 239)) }, LinearLayout.LayoutParams(-1, dp(1)))
+        return RowViews(titleView, valueView)
     }
     private fun navigate(value: String) { if (model.flow.ready) { page = value; render() } }
     private fun render() {
@@ -104,8 +113,13 @@ class MainActivity : Activity() {
         if (page == "home" && lastPage == "home" && model.isScanning && renderedScanning && nearbyList != null) {
             updateNearbyDevices(); return
         }
+        if (page == "home" && lastPage == "home" && model.flow.ready && model.library.busy &&
+            !transferRenderPolicy.needsRebuild(renderedTransferRows, transferRows())) {
+            updateFileTransfer(); return
+        }
         renderedScanning = page == "home" && model.isScanning
         nearbyList = null; nearbyRows.clear(); nearbyPlaceholder = null
+        transferSyncRow = null; transferFastRow = null; transferFileRows.clear()
         val oldScroll = if (::scroll.isInitialized && lastPage == page) scroll.scrollY else 0
         lastPage = page
         playbackTime = null; playbackProgress = null; playerElapsed = null; playerDuration = null; playerProgress = null; exportProgress = null
@@ -188,11 +202,12 @@ class MainActivity : Activity() {
             return
         }
         section("录音文件")
-        row(if (model.library.busy) "停止同步" else "重新同步文件", "${model.library.syncCountText}\n${model.library.message}", enabled = model.library.busy || !model.flow.busy) {
+        transferSyncRow = row(if (model.library.busy) "停止同步" else "重新同步文件", "${model.library.syncCountText}\n${model.library.message}", enabled = model.library.busy || !model.flow.busy) {
             if (model.library.busy) model.library.stop() else model.syncFiles()
         }
-        row(model.fastTransferTitle, model.fastTransferDetail, enabled = model.fastTransferActive || model.flow.ready) { requestFastTransfer() }
+        transferFastRow = row(model.fastTransferTitle, model.fastTransferDetail, enabled = model.fastTransferActive || model.flow.ready) { requestFastTransfer() }
         model.library.rows.forEach(::audioFileRow)
+        renderedTransferRows = transferRows()
         if (model.player.message.isNotEmpty()) note(model.player.message)
         note("音频仅保存在本机。长按已完成文件可删除本地音频。下载中停止同步会保留断点；若设备未确认停止，蓝牙可能断开，需重新连接。")
     }
@@ -217,7 +232,8 @@ class MainActivity : Activity() {
         }
         val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         details.addView(label(item.file.name).apply { setPadding(0, 0, 0, dp(4)) })
-        details.addView(label("${if (item.file.mode == 1) "Note" else "Call"} · ${item.status} · $percent%${item.speedText}\n${android.text.format.Formatter.formatFileSize(this, item.received)} / ${android.text.format.Formatter.formatFileSize(this, item.file.size)}", 13f, muted).apply { setPadding(0, 0, 0, 0) })
+        val detail = label(audioFileDetail(item), 13f, muted).apply { setPadding(0, 0, 0, 0) }
+        details.addView(detail)
         container.addView(details, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(12) })
         val accessory = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
         container.addView(accessory, LinearLayout.LayoutParams(dp(if (path != null) 64 else 80), -2))
@@ -233,12 +249,34 @@ class MainActivity : Activity() {
                 setOnClickListener { openPlayer(path, item.file.name) }
             }, LinearLayout.LayoutParams(-1, -2))
         } else {
-            accessory.addView(audioProgressBar().apply {
+            val progress = audioProgressBar().apply {
                 progress = percent * 10; contentDescription = "下载进度 $percent% ${item.file.name}"
-            }, LinearLayout.LayoutParams(-1, dp(4)))
+            }
+            accessory.addView(progress, LinearLayout.LayoutParams(-1, dp(4)))
+            transferFileRows[item.file.key] = AudioFileViews(detail, progress)
         }
         body.addView(container)
         body.addView(View(this).apply { setBackgroundColor(Color.rgb(232, 236, 239)) }, LinearLayout.LayoutParams(-1, dp(1)))
+    }
+    private fun transferRows() = model.library.rows.map { it.file.key to it.localPath }
+    private fun audioFileDetail(item: DemoAudioRow): String {
+        val percent = if (item.file.size > 0) (item.received.toDouble() / item.file.size * 100).toInt() else 0
+        return "${if (item.file.mode == 1) "Note" else "Call"} · ${item.status} · $percent%${item.speedText}\n${android.text.format.Formatter.formatFileSize(this, item.received)} / ${android.text.format.Formatter.formatFileSize(this, item.file.size)}"
+    }
+    /** 传输只替换会变动的文本和进度；文件增删或完成后才重建行。 */
+    private fun updateFileTransfer() {
+        transferSyncRow?.apply {
+            title.text = "停止同步"
+            value?.text = "${model.library.syncCountText}\n${model.library.message}"
+        }
+        transferFastRow?.apply { title.text = model.fastTransferTitle; value?.text = model.fastTransferDetail }
+        model.library.rows.forEach { item ->
+            transferFileRows[item.file.key]?.let { views ->
+                val percent = if (item.file.size > 0) (item.received.toDouble() / item.file.size * 100).toInt() else 0
+                views.detail.text = audioFileDetail(item)
+                views.progress?.apply { progress = percent * 10; contentDescription = "下载进度 $percent% ${item.file.name}" }
+            }
+        }
     }
     private fun openPlayer(source: String, fileName: String) {
         playerSource = source

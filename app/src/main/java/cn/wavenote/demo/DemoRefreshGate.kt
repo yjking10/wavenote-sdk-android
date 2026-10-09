@@ -17,3 +17,8 @@ internal class DemoRefreshGate(
     }
     fun close() { closed = true }
 }
+
+/** 区分文件传输的数值更新与需要重建行的结构变化。 */
+internal class DemoFileTransferRenderPolicy {
+    fun needsRebuild(rendered: List<Pair<String, String?>>, current: List<Pair<String, String?>>) = rendered != current
+}
