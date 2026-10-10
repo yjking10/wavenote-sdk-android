@@ -39,7 +39,7 @@ kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarg
 dependencies {
     if (providers.gradleProperty("localAar").getOrElse("true") == "true") {
         implementation(files("libs/wavenote-sdk-$sdkVersion.aar"))
-        implementation(files("libs/wavenote-audio-engine-1.0.0.aar"))
+        implementation(files("libs/wavenote-audio-engine-1.0.1.aar"))
         implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
     } else implementation("cn.wavenote:wavenote-sdk:$sdkVersion")
     implementation("androidx.media3:media3-exoplayer:1.11.1")
