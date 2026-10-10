@@ -22,7 +22,7 @@
 
 ```kotlin
 dependencies {
-    implementation(files("libs/wavenote-sdk.aar"))
+    implementation(files("libs/wavenote-sdk-0.2.3.aar"))
     implementation(files("libs/wavenote-audio-engine-1.0.0.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
     // WaveNote Audio Engine 运行时依赖
