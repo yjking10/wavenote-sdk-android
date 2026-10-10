@@ -23,7 +23,7 @@
 ```kotlin
 dependencies {
     implementation(files("libs/wavenote-sdk-0.2.3.aar"))
-    implementation(files("libs/wavenote-audio-engine-1.0.0.aar"))
+    implementation(files("libs/wavenote-audio-engine-1.0.1.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
     // WaveNote Audio Engine 运行时依赖
     implementation("androidx.media3:media3-exoplayer:1.11.1")
@@ -37,7 +37,7 @@ Demo 的 [AndroidManifest.xml](app/src/main/AndroidManifest.xml) 可作为权限
 
 ## Audio Engine：本地音频处理
 
-Demo 已引入 `wavenote-audio-engine-1.0.0.aar`，用于处理 `downloadToStorage` 返回的已完成本地音频。它与设备传输解耦，不能播放正在下载、已取消或不完整的文件。
+Demo 已引入 `wavenote-audio-engine-1.0.1.aar`，用于处理 `downloadToStorage` 返回的已完成本地音频。它与设备传输解耦，不能播放正在下载、已取消或不完整的文件。
 
 核心能力包括：
 
