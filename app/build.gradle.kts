@@ -9,7 +9,7 @@ val localProperties = Properties().apply {
 fun developmentProperty(name: String): String =
     providers.gradleProperty(name).orNull ?: localProperties.getProperty(name).orEmpty()
 fun buildConfigString(value: String): String = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
-val sdkVersion = providers.gradleProperty("sdkVersion").getOrElse("0.2.3")
+val sdkVersion = providers.gradleProperty("sdkVersion").getOrElse("0.2.4")
 
 android {
     namespace = "cn.wavenote.demo"
@@ -39,7 +39,7 @@ kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarg
 dependencies {
     if (providers.gradleProperty("localAar").getOrElse("true") == "true") {
         implementation(files("libs/wavenote-sdk-$sdkVersion.aar"))
-        implementation(files("libs/wavenote-audio-engine-1.0.1.aar"))
+        implementation(files("libs/wavenote-audio-engine-1.0.2.aar"))
         implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
     } else implementation("cn.wavenote:wavenote-sdk:$sdkVersion")
     implementation("androidx.media3:media3-exoplayer:1.11.1")
