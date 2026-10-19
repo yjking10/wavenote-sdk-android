@@ -9,7 +9,13 @@ public final class JavaIntegration {
         sdk.configure(new WaveNoteSDKConfiguration(user, false, WaveNoteReconnectPolicy.NONE, provider, false));
         return sdk;
     }
-    public static void clearForLogout(WaveNoteSDK sdk) { sdk.clearConfiguration(); }
+    /** 宿主先停止新写入；清理成功后释放旧配置，再由宿主清理凭据。 */
+    public static void clearForLogout(WaveNoteSDK sdk, WaveNoteControlCompletion completion) {
+        sdk.getFiles().clearLocalAudio(error -> {
+            if (error == null) sdk.clearConfiguration();
+            completion.complete(error);
+        });
+    }
     public static void battery(WaveNoteSDK sdk, WaveNoteCompletion<WaveNoteSettingsSnapshot> completion) {
         sdk.getDeviceSettings().query(WaveNoteSetting.BATTERY, completion);
     }

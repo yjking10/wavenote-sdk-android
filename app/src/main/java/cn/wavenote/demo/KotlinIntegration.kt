@@ -10,7 +10,13 @@ object KotlinIntegration {
             it.configure(WaveNoteSDKConfiguration(user, enableAutoReconnect = false, identityProvider = provider, enableLiveAudio = false))
         }
     }
-    fun clearForLogout(sdk: WaveNoteSDK) = sdk.clearConfiguration()
+    /** 宿主先停止新写入；清理成功后释放旧配置，再由宿主清理凭据。 */
+    fun clearForLogout(sdk: WaveNoteSDK, completion: WaveNoteControlCompletion) {
+        sdk.files.clearLocalAudio { error ->
+            if (error == null) sdk.clearConfiguration()
+            completion.complete(error)
+        }
+    }
     fun battery(sdk: WaveNoteSDK, completion: WaveNoteCompletion<WaveNoteSettingsSnapshot>) {
         sdk.deviceSettings.query(WaveNoteSetting.BATTERY, completion)
     }
