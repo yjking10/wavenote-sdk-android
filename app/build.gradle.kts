@@ -9,13 +9,13 @@ val localProperties = Properties().apply {
 fun developmentProperty(name: String): String =
     providers.gradleProperty(name).orNull ?: localProperties.getProperty(name).orEmpty()
 fun buildConfigString(value: String): String = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
-val sdkVersion = providers.gradleProperty("sdkVersion").getOrElse("0.2.5")
+val sdkVersion = providers.gradleProperty("sdkVersion").getOrElse("0.2.6")
 
 android {
     namespace = "cn.wavenote.demo"
     compileSdk = 36
     defaultConfig {
-        applicationId = "cn.wavenote.demo"; minSdk = 29; targetSdk = 36; versionCode = 4; versionName = "0.2.2"
+        applicationId = "cn.wavenote.demo"; minSdk = 29; targetSdk = 36; versionCode = 5; versionName = "0.2.6"
         buildConfigField("String", "DEMO_R202_CLOUD_PRIVATE_KEY_PKCS8_B64", "\"\"")
 
         buildConfigField("String", "DEMO_R202_USER_PUBLIC_KEY_B64", "\"\"")

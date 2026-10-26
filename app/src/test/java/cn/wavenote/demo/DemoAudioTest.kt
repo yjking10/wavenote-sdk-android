@@ -33,7 +33,7 @@ class DemoAudioTest {
         assertTrue(row.localPath!!.contains("sensitive-user"))
     }
     @Test fun stoppedListsBothModesThenSequentialDownloadsWithProgress() {
-        val lib = configured(); val calls = mutableListOf<String>(); var complete: ((String?, String?) -> Unit)? = null; var progress: ((Long) -> Unit)? = null
+        val lib = configured(); val calls = mutableListOf<String>(); var complete: ((String?, Long?, String?) -> Unit)? = null; var progress: ((Long) -> Unit)? = null
         lib.count = { mode, done -> calls.add("count$mode"); done(1, null) }
         lib.page = { mode, _, done -> calls.add("page$mode"); done(listOf(DemoAudioFile("one.opus", 7, mode)), null) }
         lib.download = { file, update, done -> calls.add("download${file.mode}"); progress = update; complete = done; {} }
@@ -44,9 +44,11 @@ class DemoAudioTest {
         progress!!(3); assertEquals(3L, lib.rows[0].received); assertNull(lib.rows[0].localPath)
         lib.converting(3,7); assertEquals("正在生成音频文件 42%", lib.rows[0].status)
         assertEquals(0,lib.completedCount); assertNull(lib.rows[0].localPath)
-        val first = complete!!; first("/one.ogg", null); first("/wrong.ogg", null)
+        val first = complete!!; first("/one.ogg", 61_000, null); first("/wrong.ogg", 1_000, null)
         assertEquals("download2", calls.last()); assertEquals("/one.ogg", lib.rows[0].localPath); assertEquals(1, lib.completedCount)
-        complete!!("/two.ogg", null); assertFalse(lib.busy); assertEquals("/two.ogg", lib.rows[1].localPath)
+        assertEquals(" · 时长 00:01:01", lib.rows[0].durationText)
+        complete!!("/two.ogg", 3_661_000, null); assertFalse(lib.busy); assertEquals("/two.ogg", lib.rows[1].localPath)
+        assertEquals(" · 时长 01:01:01", lib.rows[1].durationText)
         assertEquals("已完成同步 2/2 个文件", lib.syncCountText)
         assertEquals(2,logs.size)
         val json = org.json.JSONObject(logs[0].logJSON)
@@ -70,7 +72,7 @@ class DemoAudioTest {
         lib.page = { mode, _, done -> done(if (mode == 1) listOf(file, DemoAudioFile("two.opus", 7, 1)) else emptyList(), null) }
         lib.download = { item, _, done ->
             downloads += item.name
-            done(if (item.name == "one.opus") null else "/two.ogg", if (item.name == "one.opus") "downloadPositionMismatch" else null)
+            done(if (item.name == "one.opus") null else "/two.ogg", if (item.name == "one.opus") null else 20_000, if (item.name == "one.opus") "downloadPositionMismatch" else null)
             val cancel: () -> Unit = {}
             cancel
         }
@@ -82,10 +84,10 @@ class DemoAudioTest {
         assertEquals(listOf("one.opus", "two.opus", "two.opus"), downloads)
     }
     @Test fun manualStopShowsSavedCheckpointInsteadOfCancellationError() {
-        val lib = configured(); var complete: ((String?, String?) -> Unit)? = null
+        val lib = configured(); var complete: ((String?, Long?, String?) -> Unit)? = null
         lib.download = { _, _, done -> complete = done; {} }
         assertTrue(lib.start())
-        lib.stop(); complete!!(null, "同步已取消")
+        lib.stop(); complete!!(null, null, "同步已取消")
         assertFalse(lib.busy)
         assertEquals("同步已停止，断点已保留", lib.rows[0].status)
         assertEquals("同步已停止，可点击重新同步", lib.message)
@@ -103,11 +105,11 @@ class DemoAudioTest {
         assertFalse(lib.busy); assertTrue(lib.rows.isEmpty())
     }
     @Test fun recordingCancelsDownloadAndOldCallbacksCannotUpdate() {
-        val lib = configured(); var cancelled = 0; var complete: ((String?, String?) -> Unit)? = null; var progress: ((Long) -> Unit)? = null
+        val lib = configured(); var cancelled = 0; var complete: ((String?, Long?, String?) -> Unit)? = null; var progress: ((Long) -> Unit)? = null
         lib.download = { _, p, d -> progress = p; complete = d; { cancelled++ } }
         lib.start(); lib.observe(active); assertEquals(1, cancelled)
-        complete!!(null, "cancelled"); assertNull(lib.rows[0].localPath)
-        lib.invalidate(); progress!!(7); complete!!("/late.ogg", null); assertTrue(lib.rows.isEmpty())
+        complete!!(null, null, "cancelled"); assertNull(lib.rows[0].localPath)
+        lib.invalidate(); progress!!(7); complete!!("/late.ogg", 20_000, null); assertTrue(lib.rows.isEmpty())
     }
     @Test fun lateStoppedQueryCannotOverwriteRecordingNotification() {
         val lib = configured(); var done: ((DemoRecordingValue?, String?) -> Unit)? = null

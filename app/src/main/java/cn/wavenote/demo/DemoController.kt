@@ -290,20 +290,20 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
             library.phase(file, "检查断点")
             var cancelled = false
             var operation: WaveNoteOperation? = null
-            if (sn == null) handler.post { done(null, "连接已失效") }
+            if (sn == null) handler.post { done(null, null, "连接已失效") }
             else sdk.files.findLocalAudio(sn, if (file.mode == 1) WaveNoteRecordMode.NOTE else WaveNoteRecordMode.CALL, file.name) { cached, error ->
                 if (audioSession == session) {
-                    if (cancelled) done(null, "同步已取消")
-                    else if (error != null) done(null, errorText(error))
-                    else if (cached != null && cached.rawBytes == file.size) done(cached.file.path, null)
+                    if (cancelled) done(null, null, "同步已取消")
+                    else if (error != null) done(null, null, errorText(error))
+                    else if (cached != null && cached.rawBytes == file.size) done(cached.file.path, cached.durationMilliseconds, null)
                     else {
                         operation = sdk.files.downloadToStorage(WaveNoteFile(file.name, file.size, if (file.mode == 1) WaveNoteRecordMode.NOTE else WaveNoteRecordMode.CALL), transport = syncTransport, resume = true, deleteSource = false) { audio, failure ->
                             if (audioSession == session) {
                                 logOggDuration(if (failure == null && audio != null) "completed" else if (failure?.errorCode == WaveNoteErrorCode.OPERATION_CANCELLED) "cancelled" else "failed")
                                 progressID = null; progressCallback = null; progressFile = null
-                                if (failure != null) done(null, if (failure.operation == "downloadPositionMismatch") "downloadPositionMismatch" else if (failure.errorCode == WaveNoteErrorCode.OPERATION_CANCELLED) "同步已取消" else errorText(failure))
-                                else if (audio != null) done(audio.file.path, null)
-                                else done(null, "下载未交付文件")
+                                if (failure != null) done(null, null, if (failure.operation == "downloadPositionMismatch") "downloadPositionMismatch" else if (failure.errorCode == WaveNoteErrorCode.OPERATION_CANCELLED) "同步已取消" else errorText(failure))
+                                else if (audio != null) done(audio.file.path, audio.durationMilliseconds, null)
+                                else done(null, null, "下载未交付文件")
                             }
                         }
                         progressID = operation?.identifier; progressCallback = progress; progressFile = file

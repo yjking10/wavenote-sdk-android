@@ -261,7 +261,7 @@ class MainActivity : Activity() {
     private fun transferRows() = model.library.rows.map { it.file.key to it.localPath }
     private fun audioFileDetail(item: DemoAudioRow): String {
         val percent = if (item.file.size > 0) (item.received.toDouble() / item.file.size * 100).toInt() else 0
-        return "${if (item.file.mode == 1) "Note" else "Call"} · ${item.status} · $percent%${item.speedText}\n${android.text.format.Formatter.formatFileSize(this, item.received)} / ${android.text.format.Formatter.formatFileSize(this, item.file.size)}"
+        return "${if (item.file.mode == 1) "Note" else "Call"} · ${item.status} · $percent%${item.speedText}${item.durationText}\n${android.text.format.Formatter.formatFileSize(this, item.received)} / ${android.text.format.Formatter.formatFileSize(this, item.file.size)}"
     }
     /** 传输只替换会变动的文本和进度；文件增删或完成后才重建行。 */
     private fun updateFileTransfer() {

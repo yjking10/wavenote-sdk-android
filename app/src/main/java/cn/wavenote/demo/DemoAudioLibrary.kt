@@ -2,11 +2,12 @@ package cn.wavenote.demo
 
 data class DemoAudioFile(val name: String, val size: Long, val mode: Int) { val key get() = "$mode:$size:$name" }
 data class DemoRecordingValue(val state: Int, val name: String?, val mode: Int?)
-data class DemoAudioRow(val file: DemoAudioFile, var received: Long = 0, var status: String = "等待同步", var localPath: String? = null) {
+data class DemoAudioRow(val file: DemoAudioFile, var received: Long = 0, var status: String = "等待同步", var localPath: String? = null, var durationMilliseconds: Long? = null) {
     var kilobytesPerSecond: Double? = null
     val speedText: String get() = if (status in listOf("正在同步", "继续下载")) {
         kilobytesPerSecond?.let { java.lang.String.format(java.util.Locale.ROOT, " · %.1f KB/s", it) } ?: " · — KB/s"
     } else ""
+    val durationText: String get() = durationMilliseconds?.let { " · 时长 ${DemoRecordingClock.text(it.coerceAtLeast(0) / 1_000)}" } ?: ""
     val logJSON: String get() = org.json.JSONObject()
         .put("file", org.json.JSONObject().put("name", file.name).put("size", file.size).put("mode", file.mode).put("key", file.key))
         .put("received", received).put("status", status).put("localPath", localPath?.replace(Regex("(/wavenote/)[^/]+"), "$1[redacted]") ?: org.json.JSONObject.NULL).toString()
@@ -19,7 +20,7 @@ class DemoAudioLibrary {
     var page: (Int, Int, (List<DemoAudioFile>?, String?) -> Unit) -> Unit = { _, _, _ -> }
     /** 列表通过 BLE 读取完成后、首个下载开始前切换传输通道。 */
     var prepareDownloads: ((String?) -> Unit) -> Unit = { it(null) }
-    var download: (DemoAudioFile, (Long) -> Unit, (String?, String?) -> Unit) -> (() -> Unit) = { _, _, _ -> {} }
+    var download: (DemoAudioFile, (Long) -> Unit, (String?, Long?, String?) -> Unit) -> (() -> Unit) = { _, _, _ -> {} }
     var deleteLocal: (DemoAudioFile, (String?) -> Unit) -> Unit = { _, completion -> completion("删除本地音频未配置") }
     var changed: (() -> Unit)? = null
     var finished: (() -> Unit)? = null
@@ -122,14 +123,14 @@ class DemoAudioLibrary {
         val file = rows[index].file
         if (failedThisConnection.contains(file.key)) { rows[index].status = "同步失败，断点已保留"; changed?.invoke(); downloadNext(index + 1); return }
         if (file.size == 0L) { rows[index].status = "空文件，无法播放"; changed?.invoke(); downloadNext(index + 1); return }
-        rows[index].status = "正在同步"; rows[index].received = 0; rows[index].localPath = null
+        rows[index].status = "正在同步"; rows[index].received = 0; rows[index].localPath = null; rows[index].durationMilliseconds = null
         message = "正在同步第 ${index + 1} 个文件"; changed?.invoke()
         val ticket = next()
         val rate = DemoTransferRate()
         rows[index].kilobytesPerSecond = null
         cancelDownload = download(file, { bytes ->
             if (busy && generation == ticket.first && request == ticket.second) { rows[index].kilobytesPerSecond = rate.sample(bytes); rows[index].received = bytes.coerceIn(0, file.size); changed?.invoke() }
-        }, { path, error ->
+        }, { path, durationMilliseconds, error ->
             if (accept(ticket)) {
                 cancelDownload = null
                 rows[index].kilobytesPerSecond = null
@@ -144,7 +145,7 @@ class DemoAudioLibrary {
                     } else { rows[index].status = if (isRecording) "录音开始，下载中断" else error; end(if (stopRequested) "同步已暂停，未完成文件不会用于播放" else error) }
                 }
                 else if (path == null) { rows[index].status = "缺少本地文件"; end("下载未交付完整文件") }
-                else { rows[index].localPath = path; rows[index].received = file.size; rows[index].status = "同步完成"; completedRow?.invoke(rows[index].copy()); changed?.invoke(); downloadNext(index + 1) }
+                else { rows[index].localPath = path; rows[index].durationMilliseconds = durationMilliseconds; rows[index].received = file.size; rows[index].status = "同步完成"; completedRow?.invoke(rows[index].copy()); changed?.invoke(); downloadNext(index + 1) }
             }
         })
     }
