@@ -269,7 +269,7 @@ Demo 还演示了 `setMicrophoneGain`、`setVibrationGain`、`setAutoPowerOff`�
 
 ## 文件同步与本地音频
 
-文件区提供“使用 Wi-Fi 快传”入口；BLE 同步过程中也可点击。Demo 会先停止当前下载并保留断点，完成热点切换后以 Wi-Fi 从断点继续；退出快传后等待蓝牙恢复。
+文件区提供“使用 Wi-Fi 快传”入口；BLE 同步过程中也可点击。Demo 会先停止当前下载并保留断点，完成热点切换后以 Wi-Fi 从断点继续；退出快传后等待蓝牙恢复。热点选择最多等待120秒；用户未在系统弹窗确认时，Demo 不显示错误，等待设备自动关闭热点并恢复蓝牙后继续断点同步。BLE 恢复最多等待60秒，连接失败、蓝牙关闭或超时会结束本轮同步并提示重新扫描；权限、Wi-Fi开关、完整建连期限或TCP连接等真实故障仍正常提示。
 
 设备空闲且连接已就绪后，可按录音模式查询文件。`count` 返回数量，`page` 按页返回文件；使用列表结果创建或直接使用 `WaveNoteFile` 下载。托管下载 `downloadToStorage` 由 SDK 管理当前用户的本地音频，Completion 成功时返回 `WaveNoteLocalAudio`。
 

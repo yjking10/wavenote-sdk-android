@@ -80,6 +80,7 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
     private var syncSerialNumber: String? = null
     private var wifiWorkflow = false
     private var pendingFastTransferStart = false
+    private val wifiFallback = DemoWiFiFallback()
     private var wifiOpenOperation: WaveNoteOperation? = null
     private var wifiResult = ""
     val fastTransferActive get() = wifiWorkflow
@@ -91,7 +92,8 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
         WaveNoteWiFiState.READY -> "Wi-Fi 快传已就绪"
         WaveNoteWiFiState.CLOSING -> "正在关闭 Wi-Fi 快传…"
         WaveNoteWiFiState.RESTORING_BLUETOOTH -> "正在恢复蓝牙连接…"
-        WaveNoteWiFiState.FAILED -> "Wi-Fi 快传失败"
+        WaveNoteWiFiState.FAILED -> if (sdk.wifi.snapshot.error?.let { DemoValues.isOptionalWiFiFallback(it.code, it.operation) } == true)
+            "未选择 Wi-Fi，等待设备关闭热点并恢复蓝牙" else "Wi-Fi 快传失败"
         else -> "可在文件同步过程中切换，未完成文件会从断点继续"
     }
     var changed: (() -> Unit)? = null
@@ -216,18 +218,23 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
         }
     }
     override fun didUpdateBluetoothState(sdk: WaveNoteSDK, state: WaveNoteBluetoothState) {
-        bluetooth = listOf("蓝牙状态未知", "蓝牙未授权 · 可前往系统设置", "此设备不支持蓝牙", "蓝牙已关闭", "蓝牙已开启", "蓝牙正在重置")[state.value]; changed?.invoke()
+        bluetooth = listOf("蓝牙状态未知", "蓝牙未授权 · 可前往系统设置", "此设备不支持蓝牙", "蓝牙已关闭", "蓝牙已开启", "蓝牙正在重置")[state.value]
+        if (wifiFallback.pending && state in listOf(WaveNoteBluetoothState.UNAUTHORIZED, WaveNoteBluetoothState.UNSUPPORTED, WaveNoteBluetoothState.POWERED_OFF)) {
+            failWiFiFallback()
+        } else changed?.invoke()
     }
     override fun didUpdateDiscoveredDevices(sdk: WaveNoteSDK, devices: List<WaveNoteDiscoveredDevice>) { this.devices = devices; changed?.invoke() }
     override fun didChangeConnectionState(sdk: WaveNoteSDK, state: WaveNoteConnectionState, device: WaveNoteDevice?) {
         if (state == WaveNoteConnectionState.DISCONNECTED && flow.selecting) return
         if (wifiWorkflow && state != WaveNoteConnectionState.READY) {
+            if (wifiFallback.pending && state == WaveNoteConnectionState.FAILED) { failWiFiFallback(); return }
             status = if (state in listOf(WaveNoteConnectionState.CONNECTING, WaveNoteConnectionState.DISCOVERING_SERVICES, WaveNoteConnectionState.RECONNECTING))
                 "Wi-Fi 已关闭，正在恢复蓝牙连接…" else fastTransferDetail
             changed?.invoke(); return
         }
         when (state) {
             WaveNoteConnectionState.READY -> {
+                if (wifiFallback.pending) { resumeWiFiFallback(); return }
                 if (wifiWorkflow && !library.busy && sdk.wifi.snapshot.state !in listOf(WaveNoteWiFiState.READY, WaveNoteWiFiState.CLOSING)) { finishFastTransferWorkflow(); return }
                 if (!flow.ready) { flow.connected(); snapshot = null; mode = null; audioSession++; library.invalidate(); observeRecording(sdk.recording.snapshot); scheduleSync() }
                 status = "已连接，点击顶部 SN 查看设备设置。"
@@ -255,7 +262,9 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
             WaveNoteWiFiState.READY -> "Wi-Fi 已连接，开始传输文件。"
             WaveNoteWiFiState.CLOSING -> "正在关闭 Wi-Fi 快传…"
             WaveNoteWiFiState.RESTORING_BLUETOOTH -> "Wi-Fi 已关闭，正在恢复蓝牙连接…"
-            WaveNoteWiFiState.FAILED -> snapshot.error?.let(::errorText) ?: "Wi-Fi 快传失败，正在恢复蓝牙。"
+            WaveNoteWiFiState.FAILED -> if (snapshot.error?.let { DemoValues.isOptionalWiFiFallback(it.code, it.operation) } == true)
+                "未选择 Wi-Fi，等待设备关闭热点并恢复蓝牙…"
+            else snapshot.error?.let(::errorText) ?: "Wi-Fi 快传失败，正在恢复蓝牙。"
             else -> fastTransferDetail
         }
         changed?.invoke()
@@ -281,7 +290,16 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
             if (syncTransport != WaveNoteTransferTransport.WIFI) done(null)
             else {
                 status = "文件列表已读取，正在开启 Wi-Fi 快传…"; changed?.invoke()
-                wifiOpenOperation = sdk.wifi.startFastTransfer { error -> wifiOpenOperation = null; done(error?.let(::errorText)) }
+                wifiOpenOperation = sdk.wifi.startFastTransfer { error ->
+                    wifiOpenOperation = null
+                    if (error != null && DemoValues.isOptionalWiFiFallback(error.code, error.operation)) {
+                        syncTransport = WaveNoteTransferTransport.BLUETOOTH
+                        val fallbackToken = wifiFallback.begin(done)
+                        handler.postDelayed({ failWiFiFallback(fallbackToken) }, DemoWiFiFallback.TIMEOUT_MILLIS)
+                        status = "未选择 Wi-Fi，等待设备关闭热点并恢复蓝牙…"; changed?.invoke()
+                        if (sdk.connectionState == WaveNoteConnectionState.READY) resumeWiFiFallback()
+                    } else done(error?.let(::errorText))
+                }
             }
         }
         library.download = { file, progress, done ->
@@ -334,6 +352,19 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
     private fun finishLibraryFlow() {
         libraryToken?.let { flow.finish(it) }; libraryToken = null; syncSerialNumber = null; syncTransport = WaveNoteTransferTransport.BLUETOOTH; changed?.invoke()
     }
+    private fun resumeWiFiFallback() {
+        val resume = wifiFallback.take() ?: return
+        wifiWorkflow = false; wifiOpenOperation = null; wifiResult = ""
+        resume(null)
+        status = "未选择 Wi-Fi，已恢复蓝牙并继续同步文件。"; changed?.invoke()
+    }
+    private fun failWiFiFallback(token: Int? = null) {
+        val fail = wifiFallback.take(token) ?: return
+        wifiWorkflow = false; wifiOpenOperation = null; wifiResult = ""
+        fail(DemoWiFiFallback.TIMEOUT_ERROR)
+        resetAudio(); flow.invalidate()
+        status = DemoWiFiFallback.TIMEOUT_ERROR; changed?.invoke()
+    }
     private fun closeFastTransferAfterSync() {
         when (sdk.wifi.snapshot.state) {
             WaveNoteWiFiState.READY -> sdk.wifi.stopFastTransfer { error -> if (error != null) { status = errorText(error); changed?.invoke() } }
@@ -344,7 +375,7 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
     }
     private fun finishFastTransferWorkflow() {
         val result = wifiResult.ifEmpty { library.message }
-        wifiWorkflow = false; wifiOpenOperation = null; wifiResult = ""; finishLibraryFlow()
+        wifiFallback.cancel(); wifiWorkflow = false; wifiOpenOperation = null; wifiResult = ""; finishLibraryFlow()
         status = "$result；Wi-Fi 已关闭，蓝牙已恢复。"; changed?.invoke()
     }
     private fun scheduleSync() {
@@ -370,7 +401,7 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
     }
     private fun resetAudio() {
         logOggDuration("interrupted")
-        audioSession++; scheduledSync++; libraryToken = null; progressID = null; progressCallback = null; syncSerialNumber = null
+        audioSession++; scheduledSync++; libraryToken = null; progressID = null; progressCallback = null; syncSerialNumber = null; wifiFallback.cancel()
         library.invalidate(); recordingClock.update(DemoRecordingValue(0, null, null)); player.stop()
     }
     override fun didUpdate(files: WaveNoteFiles, progress: WaveNoteTransferProgress) {

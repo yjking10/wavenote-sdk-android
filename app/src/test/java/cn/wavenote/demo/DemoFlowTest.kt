@@ -65,6 +65,35 @@ class DemoFlowTest {
     @Test fun unknownAndCustomAutoPowerOffAreNotDefaulted() {
         assertEquals("未知", DemoFlow.minutes(null)); assertEquals("永不", DemoFlow.minutes(0)); assertEquals("17 分钟", DemoFlow.minutes(17))
     }
+    @Test fun onlyUnconfirmedHotspotSelectionFallsBackSilently() {
+        listOf("hotspotDenied", "hotspotJoinTimeout").forEach {
+            assertTrue(DemoValues.isOptionalWiFiFallback(1206, it))
+        }
+        listOf("wifiConnectTimeout", "hotspotPermission", "hotspotWifiDisabled", "tcpConnectTimeout").forEach {
+            assertFalse(DemoValues.isOptionalWiFiFallback(1206, it))
+        }
+        assertFalse(DemoValues.isOptionalWiFiFallback(1105, "hotspotJoinTimeout"))
+    }
+
+    @Test fun wifiFallbackContinuationCanOnlyBeTakenOnceAndRejectsStaleTimeout() {
+        val fallback = DemoWiFiFallback()
+        var result: String? = "not-called"
+        val first = fallback.begin { result = it }
+        fallback.cancel()
+        val second = fallback.begin { result = it }
+        assertNull(fallback.take(first))
+        val completion = fallback.take(second)
+        assertNotNull(completion)
+        completion!!(null)
+        assertNull(result)
+        assertNull(fallback.take(second))
+        assertFalse(fallback.pending)
+
+        val timeout = fallback.begin { result = it }
+        fallback.take(timeout)!!(DemoWiFiFallback.TIMEOUT_ERROR)
+        assertEquals(60_000L, DemoWiFiFallback.TIMEOUT_MILLIS)
+        assertEquals(DemoWiFiFallback.TIMEOUT_ERROR, result)
+    }
 }
 
 class DemoSettingsTest {

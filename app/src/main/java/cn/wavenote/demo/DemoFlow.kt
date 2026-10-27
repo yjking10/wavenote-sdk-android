@@ -66,7 +66,34 @@ object DemoReadSequence {
         next()
     }
 }
+
+class DemoWiFiFallback {
+    companion object {
+        const val TIMEOUT_MILLIS = 60_000L
+        const val TIMEOUT_ERROR = "蓝牙恢复超时，请重新扫描连接。"
+    }
+    private var generation = 0
+    private var completion: ((String?) -> Unit)? = null
+    val pending get() = completion != null
+    fun begin(completion: (String?) -> Unit): Int {
+        check(this.completion == null)
+        generation++
+        this.completion = completion
+        return generation
+    }
+    fun take(token: Int? = null): ((String?) -> Unit)? {
+        if (token != null && token != generation) return null
+        val current = completion ?: return null
+        completion = null
+        generation++
+        return current
+    }
+    fun cancel() { generation++; completion = null }
+}
+
 object DemoValues {
+    fun isOptionalWiFiFallback(code: Int, operation: String) =
+        code == 1206 && operation in setOf("hotspotDenied", "hotspotJoinTimeout")
     fun usb(raw: Int?) = when (raw) { 1 -> "已开启"; 0 -> "已关闭"; else -> "未知" }
     fun canSetUSB(raw: Int?) = raw == 0 || raw == 1
     fun error(code: Int) = when (code) {
