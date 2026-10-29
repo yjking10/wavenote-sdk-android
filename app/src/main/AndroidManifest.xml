@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
     <application android:dataExtractionRules="@xml/data_extraction_rules" android:fullBackupContent="false" android:label="WaveNote Demo" android:theme="@style/DemoTheme" android:allowBackup="false" android:supportsRtl="true">
+        <provider android:name=".DiagnosticsShareProvider" android:authorities="${applicationId}.diagnostics" android:exported="false" android:grantUriPermissions="true" />
         <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity>

@@ -31,6 +31,7 @@ class MainActivity : Activity() {
     private var infoTitle = ""
     private var infoText = ""
     private var dialog: AlertDialog? = null
+    private var exportingDiagnostics = false
     private val accent = Color.rgb(23, 108, 131)
     private val ink = Color.rgb(28, 37, 46)
     private val muted = Color.rgb(90, 103, 115)
@@ -137,6 +138,11 @@ class MainActivity : Activity() {
             typeface = if (page == "home" && model.flow.ready) Typeface.MONOSPACE else Typeface.DEFAULT_BOLD
             if (page == "home" && model.flow.ready) { setTextColor(accent); contentDescription = "已连接设备，点击设置：$title"; setOnClickListener { navigate("settings"); model.refresh() } }
         }, LinearLayout.LayoutParams(0, -2, 1f))
+        if (page == "home") nav.addView(Button(this).apply {
+            text = if (exportingDiagnostics) "正在导出…" else "导出日志"
+            contentDescription = "导出日志"; isEnabled = !exportingDiagnostics
+            setOnClickListener { exportDiagnostics(this) }
+        })
         root.addView(nav)
         scroll = ScrollView(this).apply { isFillViewport = true }
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -158,6 +164,33 @@ class MainActivity : Activity() {
         section("附近设备")
         nearbyList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; body.addView(this) }
         updateNearbyDevices()
+    }
+    private fun exportDiagnostics(button: Button) {
+        if (exportingDiagnostics) return
+        exportingDiagnostics = true; button.isEnabled = false; button.text = "正在导出…"
+        val activity = java.lang.ref.WeakReference(this)
+        val exportButton = java.lang.ref.WeakReference(button)
+        model.sdk.exportDiagnostics { file, error ->
+            val screen = activity.get()
+            if (screen != null && !screen.isFinishing && !screen.isDestroyed) {
+                screen.exportingDiagnostics = false
+                exportButton.get()?.let { it.isEnabled = true; it.text = "导出日志" }
+                if (file != null && error == null) {
+                    try {
+                        val uri = DiagnosticsShareProvider.uri(screen, file)
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "application/octet-stream"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            clipData = android.content.ClipData.newRawUri("WaveNote 诊断日志", uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        screen.startActivity(Intent.createChooser(intent, "导出日志"))
+                    } catch (_: Exception) {
+                        Toast.makeText(screen, "无法打开系统分享，请稍后重试。", Toast.LENGTH_LONG).show()
+                    }
+                } else Toast.makeText(screen, "导出日志失败，请确认已配置 SDK 并开启生产诊断后重试。", Toast.LENGTH_LONG).show()
+            }
+        }
     }
     private fun updateNearbyDevices() {
         val list = nearbyList ?: return
