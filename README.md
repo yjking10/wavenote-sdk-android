@@ -39,7 +39,7 @@ Demo 的 [AndroidManifest.xml](app/src/main/AndroidManifest.xml) 可作为权限
 
 首页顶部“导出日志”在未连接、连接失败或蓝牙关闭时仍可使用。点击后显示“正在导出…”，生成快照期间禁止重复点击，成功后打开 Android 系统分享菜单；分享取消正常返回，不提示发送成功。
 
-附件仅包含 SDK 生产诊断 JSONL，不包含音频、逐帧控制台日志或设备端日志。有效配置后默认记录关键状态、错误码、阶段和耗时，默认最多 2 MiB／7 天，可通过 `configureProductionDiagnostics` 调整；与 `openLog` 独立。导出文件最多保留 24 小时，在启动或后续导出时清理；换用户、退出和清除诊断时提前删除，分享时不要删除附件。
+附件仅包含 SDK 生产诊断 JSONL，不包含音频、逐帧控制台日志或设备端日志。Demo 显式开启后记录关键状态、错误码、阶段和耗时，默认最多 2 MiB／7 天，可通过 `configureProductionDiagnostics` 调整；与 `openLog` 独立。导出文件最多保留 24 小时，在启动或后续导出时清理；换用户、退出和清除诊断时提前删除，分享时不要删除附件。
 
 宿主调用 `sdk.exportDiagnostics { file, error -> ... }`，通过只读 ContentProvider 生成 `content://` URI，再使用 `ACTION_SEND`、`ClipData`、`FLAG_GRANT_READ_URI_PERMISSION` 和 `Intent.createChooser` 打开分享。完整实现见 `MainActivity.kt`、`DiagnosticsShareProvider.kt` 及 Manifest 注册；Provider 不导出，只接受临时授权，拒绝目录枚举、路径穿越和写入，不需要存储权限或额外依赖。SDK 不联网上传。
 
