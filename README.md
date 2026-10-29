@@ -22,7 +22,7 @@
 
 ```kotlin
 dependencies {
-    implementation(files("libs/wavenote-sdk-0.2.6.aar"))
+    implementation(files("libs/wavenote-sdk-0.2.7.aar"))
     implementation(files("libs/wavenote-audio-engine-1.0.2.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
     // WaveNote Audio Engine 运行时依赖
@@ -43,7 +43,7 @@ Demo 的 [AndroidManifest.xml](app/src/main/AndroidManifest.xml) 可作为权限
 
 宿主调用 `sdk.exportDiagnostics { file, error -> ... }`，通过只读 ContentProvider 生成 `content://` URI，再使用 `ACTION_SEND`、`ClipData`、`FLAG_GRANT_READ_URI_PERMISSION` 和 `Intent.createChooser` 打开分享。完整实现见 `MainActivity.kt`、`DiagnosticsShareProvider.kt` 及 Manifest 注册；Provider 不导出，只接受临时授权，拒绝目录枚举、路径穿越和写入，不需要存储权限或额外依赖。SDK 不联网上传。
 
-`app/libs/wavenote-sdk-0.2.6.aar` 已更新为包含生产诊断配置接口的本地构建版。
+`app/libs/wavenote-sdk-0.2.7.aar` 已更新为包含生产诊断配置接口的本地构建版。
 
 ## Audio Engine：本地音频处理
 
