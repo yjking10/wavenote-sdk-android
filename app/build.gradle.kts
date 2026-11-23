@@ -41,6 +41,7 @@ dependencies {
         implementation(files("libs/wavenote-sdk-$sdkVersion.aar"))
         implementation(files("libs/wavenote-audio-engine-1.0.2.aar"))
         implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
+        implementation("androidx.core:core:1.7.0")
     } else implementation("cn.wavenote:wavenote-sdk:$sdkVersion")
     implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-common:1.11.1")

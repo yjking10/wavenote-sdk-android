@@ -19,12 +19,16 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
 import android.widget.*
+import cn.wavenote.sdk.WaveNoteBluetoothFirmwareUpdateDelegate
+import cn.wavenote.sdk.WaveNoteOTAState
+import cn.wavenote.sdk.WaveNoteOperation
+import cn.wavenote.sdk.WaveNoteConnectionState
 
 /** 独立二进制 SDK 演示：只通过公共 API 进行连接与设置。 */
 // Demo 固定中文界面；Android 13+ 使用上方注册的原生返回回调。
 @SuppressLint("SetTextI18n")
 class MainActivity : Activity() {
-    companion object { private const val REQUEST_EXPORT_DENOISED = 3 }
+    companion object { private const val REQUEST_EXPORT_DENOISED = 3; private const val REQUEST_OTA_FILE = 4 }
     private lateinit var model: DemoController
     private var page = "home"
     private var draft = ""
@@ -32,6 +36,14 @@ class MainActivity : Activity() {
     private var infoText = ""
     private var dialog: AlertDialog? = null
     private var exportingDiagnostics = false
+    private var otaFile: java.io.File? = null
+    private var otaImporting = false
+    private var otaMessage = "请选择适用于当前设备的本地蓝牙固件。"
+    private var otaOperation: WaveNoteOperation? = null
+    private val otaDelegate = WaveNoteBluetoothFirmwareUpdateDelegate { _, _ -> requestRender() }
+    private val otaRunning: Boolean get() = model.sdk.bluetoothFirmwareUpdate.snapshot?.state?.let {
+        it !in listOf(WaveNoteOTAState.COMPLETED, WaveNoteOTAState.CANCELLED, WaveNoteOTAState.FAILED)
+    } == true
     private val accent = Color.rgb(23, 108, 131)
     private val ink = Color.rgb(28, 37, 46)
     private val muted = Color.rgb(90, 103, 115)
@@ -77,9 +89,10 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         model = DemoController(applicationContext)
+        model.sdk.bluetoothFirmwareUpdate.delegate = otaDelegate
         model.player.progressChanged = { updatePlaybackProgress() }
         model.changed = {
-            if (!model.flow.ready && page != "home") { page = "home"; playerSource = null; model.player.stop(); dialog?.dismiss(); dialog = null }
+            if (!model.flow.ready && page != "home" && page != "ota") { page = "home"; playerSource = null; model.player.stop(); dialog?.dismiss(); dialog = null }
             requestRender()
         }
         if (Build.VERSION.SDK_INT >= 33) onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) { back() }
@@ -90,7 +103,7 @@ class MainActivity : Activity() {
     override fun onDestroy() { renderGate.close(); timer.removeCallbacksAndMessages(null); model.dispose(); super.onDestroy() }
     @SuppressLint("GestureBackNavigation")
     @Deprecated("Compatibility with Android 10–12") override fun onBackPressed() { back() }
-    private fun back() { when (page) { "home" -> finish(); "settings", "recording", "player" -> { if (page == "player") { model.player.stop(); playerSource = null }; page = "home"; render() }; else -> { page = "settings"; render() } } }
+    private fun back() { when (page) { "home" -> finish(); "settings", "recording", "player", "ota" -> { if (page == "player") { model.player.stop(); playerSource = null }; page = "home"; render() }; else -> { page = "settings"; render() } } }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private fun label(text: String, size: Float = 16f, color: Int = ink): TextView = TextView(this).apply {
         this.text = text; textSize = size; setTextColor(color); setPadding(dp(20), dp(12), dp(20), dp(12))
@@ -133,7 +146,7 @@ class MainActivity : Activity() {
         }
         val nav = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(Color.WHITE) }
         if (page != "home") nav.addView(Button(this).apply { text = "返回"; setOnClickListener { back() } })
-        val title = when (page) { "home" -> if (model.flow.ready) model.sdk.connectedDevice?.serialNumber ?: "WaveNote" else "WaveNote"; "recording" -> "当前录音"; "player" -> "播放器"; "settings" -> "设备设置"; "mic" -> "麦克风增益"; "vcs" -> "振动传感器增益"; "power" -> "自动关机"; else -> infoTitle }
+        val title = when (page) { "home" -> if (model.flow.ready) model.sdk.connectedDevice?.serialNumber ?: "WaveNote" else "WaveNote"; "recording" -> "当前录音"; "player" -> "播放器"; "settings" -> "设备设置"; "ota" -> "蓝牙固件升级"; "mic" -> "麦克风增益"; "vcs" -> "振动传感器增益"; "power" -> "自动关机"; else -> infoTitle }
         nav.addView(label(title, if (page == "home" && model.flow.ready) 14f else 20f).apply {
             typeface = if (page == "home" && model.flow.ready) Typeface.MONOSPACE else Typeface.DEFAULT_BOLD
             if (page == "home" && model.flow.ready) { setTextColor(accent); contentDescription = "已连接设备，点击设置：$title"; setOnClickListener { navigate("settings"); model.refresh() } }
@@ -147,10 +160,13 @@ class MainActivity : Activity() {
         scroll = ScrollView(this).apply { isFillViewport = true }
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(body); root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f)); setContentView(root)
-        when (page) { "home" -> home(); "recording" -> recording(); "player" -> player(); "settings" -> settings(); "mic", "vcs" -> gain(); "power" -> power(); else -> note(infoText) }
+        when (page) { "home" -> home(); "recording" -> recording(); "player" -> player(); "settings" -> settings(); "ota" -> ota(); "mic", "vcs" -> gain(); "power" -> power(); else -> note(infoText) }
         scroll.post { scroll.scrollTo(0, oldScroll) }; root.requestApplyInsets()
     }
     private fun home() {
+        if (model.sdk.bluetoothFirmwareUpdate.snapshot != null) {
+            row("蓝牙固件升级", "查看升级和连接状态") { page = "ota"; render() }
+        }
         section("连接设备")
         row(if (model.isScanning) "正在扫描…" else "开始扫描", enabled = !model.isScanning && !model.flow.busy && !model.flow.ready) { requestScan() }
         row(model.bluetooth) { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
@@ -406,6 +422,9 @@ class MainActivity : Activity() {
     @Deprecated("Activity result API compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_OTA_FILE && resultCode == RESULT_OK) {
+            data?.data?.let(::importOtaFile)
+        }
         if (requestCode == REQUEST_EXPORT_DENOISED && resultCode == RESULT_OK) {
             data?.data?.let(model.player::exportDenoised)
         }
@@ -424,6 +443,7 @@ class MainActivity : Activity() {
         val disk = if (s?.storageUsed != null && s.storageTotal != null && s.storageTotal!! > 0) "${s.storageUsed} / ${s.storageTotal}（${(s.storageUsed!!.toDouble() / s.storageTotal!! * 100).toInt()}%）" else "未知"
         row("存储", disk) { info("设备存储", "已用 / 总量：$disk\n\n容量保留设备原始单位。此页面仅查看使用情况，不清空设备内容。") }
         row("固件版本", s?.firmwareVersion ?: "未知")
+        row("蓝牙固件升级", "本地固件") { navigate("ota") }
         row("自动关机", DemoFlow.minutes(s?.autoPowerOffMinutes), enabled = idle) { navigate("power") }
         section("隐私与安全")
         body.addView(Switch(this).apply {
@@ -448,6 +468,81 @@ class MainActivity : Activity() {
         row("解绑设备", enabled = idle, destructive = true) { confirm("解绑设备", "仅解除本机演示账户归属，不清空设备内容。") { model.unbind() } }
         row("解绑设备并清空内容", enabled = idle, destructive = true) { confirm("解绑设备并清空内容", "R202 将解除本机演示账户归属并永久清空设备内容，此操作不可恢复；其他设备仅解绑。") { model.unbind(eraseDeviceFiles = true) } }
         note("演示身份：本地模拟")
+    }
+    private fun ota() {
+        val updater = model.sdk.bluetoothFirmwareUpdate
+        val progress = updater.snapshot
+        section("本地蓝牙固件")
+        row(if (otaImporting) "正在导入固件…" else "选择固件文件", enabled = !otaRunning && !otaImporting) {
+            @Suppress("DEPRECATION")
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                type = "*/*"; addCategory(Intent.CATEGORY_OPENABLE)
+            }, REQUEST_OTA_FILE)
+        }
+        note(otaFile?.let { "已导入固件（" + it.length() + " 字节）" } ?: "尚未选择固件")
+        row("开始升级", enabled = !otaRunning && !otaImporting && otaFile != null && model.flow.ready) {
+            confirm("升级蓝牙固件", "确认此固件适用于当前设备，并在升级期间保持设备供电。") {
+                val file = otaFile ?: return@confirm
+                requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LOCKED
+                otaMessage = "正在准备升级…"
+                otaOperation = updater.start(file) { error ->
+                    if (error != null) android.util.Log.w("WaveNoteOTA", "OTA failed code=${error.code} operation=${error.operation}")
+                    otaMessage = error?.let { DemoValues.error(it.code) + "（" + it.code + "）" }
+                        ?: "固件升级成功，业务连接将自动恢复。"
+                    otaOperation = null
+                    requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                    requestRender()
+                }
+                requestRender()
+            }
+        }
+        section("升级状态")
+        if (progress != null) {
+            val state = when (progress.state) {
+                WaveNoteOTAState.PREPARING -> "准备中"
+                WaveNoteOTAState.UPGRADING -> "升级中"
+                WaveNoteOTAState.RECONNECTING -> "重新连接"
+                WaveNoteOTAState.REBOOTING -> "设备重启中"
+                WaveNoteOTAState.COMPLETED -> "升级成功"
+                WaveNoteOTAState.CANCELLED -> "已取消"
+                WaveNoteOTAState.FAILED -> "升级失败"
+            }
+            note(state + " · " + progress.progress + "%")
+            body.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = 100; this.progress = progress.progress
+                setPadding(dp(20), 0, dp(20), 0)
+            })
+        }
+        note(otaMessage)
+        note(if (otaRunning) "升级期间暂停业务操作" else if (model.sdk.connectionState == WaveNoteConnectionState.READY) "业务连接已就绪" else "业务连接尚未就绪")
+        row("请求取消升级", enabled = otaRunning && progress?.canCancel == true) {
+            updater.cancel { error ->
+                otaMessage = error?.let { "取消未确认：" + it.code + " · " + it.operation + "，以升级状态为准。" }
+                    ?: "原生流程已确认取消。"
+                requestRender()
+            }
+        }
+        note("升级期间请保持设备供电并将应用留在前台。设备可能重启、重新连接；99% 时仍须等待升级结果。")
+    }
+    private fun importOtaFile(uri: Uri) {
+        if (otaRunning || otaImporting) return
+        otaImporting = true; requestRender()
+        val destination = java.io.File(cacheDir, "bluetooth-firmware-" + java.util.UUID.randomUUID() + ".ufw")
+        Thread({
+            val copied = try {
+                val input = contentResolver.openInputStream(uri) ?: throw java.io.IOException()
+                input.use { stream -> destination.outputStream().use { stream.copyTo(it) } }
+                true
+            } catch (_: Exception) { destination.delete(); false }
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                if (copied) {
+                    otaFile?.delete(); otaFile = destination
+                    otaMessage = "固件已导入，请核对设备和固件后开始升级。"
+                } else otaMessage = "无法读取固件文件，请重新选择。"
+                otaImporting = false; requestRender()
+            }
+        }, "WaveNoteDemo.firmware").start()
     }
     private fun gain() {
         section("原始增益值")

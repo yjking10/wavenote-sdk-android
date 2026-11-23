@@ -25,6 +25,8 @@ dependencies {
     implementation(files("libs/wavenote-sdk-0.2.7.aar"))
     implementation(files("libs/wavenote-audio-engine-1.0.2.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
+    // 本地 AAR 不会自动解析运行依赖；蓝牙 OTA 的权限检查需要 Core
+    implementation("androidx.core:core:1.7.0")
     // WaveNote Audio Engine 运行时依赖
     implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-common:1.11.1")
@@ -32,6 +34,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }
 ```
+
+宿主的 `gradle.properties` 需设置 `android.useAndroidX=true`。Maven 接入 `cn.wavenote:wavenote-sdk:0.2.7` 会自动解析 Core；本地 AAR 按上面的依赖配置。
 
 Demo 的 [AndroidManifest.xml](app/src/main/AndroidManifest.xml) 可作为权限声明参考；仍须在运行时向用户请求相应权限。
 
@@ -373,3 +377,8 @@ fun logout(sdk: WaveNoteSDK) {
 - 不要把签名、私钥、登录凭据或其他敏感材料写入 APK、日志、代码仓库或 README。
 
 Provider 可参考 [IdentityProvider.kt](app/src/main/java/cn/wavenote/demo/IdentityProvider.kt) 的适配方式。该示例仅用于演示接口调用，接入方应按自己的认证体系实现网络请求、会话失效和安全存储策略。
+
+
+## 蓝牙固件升级
+
+设备设置 → 蓝牙固件升级，选择适用于当前 Note 的本地固件后点击开始。页面展示统一阶段、进度、可用时的取消和业务连接恢复状态。宿主仅使用 WaveNote 接口；原生库已内置。iOS 仅真机支持 OTA。固件正确性、真实刷写、重连及取消须在指定设备单独验收。
