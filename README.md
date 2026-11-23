@@ -381,4 +381,119 @@ Provider 可参考 [IdentityProvider.kt](app/src/main/java/cn/wavenote/demo/Iden
 
 ## 蓝牙固件升级
 
-设备设置 → 蓝牙固件升级，选择适用于当前 Note 的本地固件后点击开始。页面展示统一阶段、进度、可用时的取消和业务连接恢复状态。宿主仅使用 WaveNote 接口；原生库已内置。iOS 仅真机支持 OTA。固件正确性、真实刷写、重连及取消须在指定设备单独验收。
+设备设置 → 蓝牙固件升级 → 选择固件文件 → 开始升级。完整页面及导入代码见 [MainActivity.kt](app/src/main/java/cn/wavenote/demo/MainActivity.kt)。
+
+公开 OTA 入口为 `sdk.bluetoothFirmwareUpdate`，用于杰理蓝牙固件。原生依赖已内置，无需 Flutter 或单独接管杰理连接；开始时复用当前已就绪的 BLE 连接，SDK 处理升级期间的必要断开和回连。乐鑫 OTA 仅内部保留实现，暂不提供公共入口。
+
+### 调用前提与接口
+
+- 所有调用、进度代理和 completion 均在主线程。先完成 SDK 配置、蓝牙授权及连接，等待 `connectionState == WaveNoteConnectionState.READY`，再由用户确认设备和固件后启动。
+- 传入可读、非空、大小不超过 `Int.MAX_VALUE` 字节的本地文件；宿主确认固件适用于当前设备，并在升级期间保持文件内容和访问权限稳定。SDK 不下载固件，也不按文件名判断适配型号。
+- 系统文件选择器返回 `content://` URI 时，先在后台通过 `ContentResolver` 复制到 App 缓存等本地目录，再将 `File` 传入 SDK；不要将 URI 的 path 直接当本地文件。Demo 已实现此流程，无需新增广泛存储权限。
+- 直接 AAR 接入须添加 `androidx.core:core:1.7.0` 或兼容的更高版本，并启用 AndroidX，配置见上文“集成前提”。升级期间保持设备供电及 App 前台运行，并在真实蓝牙设备上验收。
+
+以下接口属于 `sdk.bluetoothFirmwareUpdate`；Java 通过 `sdk.getBluetoothFirmwareUpdate()` 取得管理器：
+
+| Kotlin 接口 | Java 对应接口 | 用途 |
+| --- | --- | --- |
+| `start(file, completion): WaveNoteOperation` | `start(File, WaveNoteControlCompletion)` | 启动升级；completion 在本次升级结束或请求被拒绝时回调一次，`null` 表示原生确认升级成功 |
+| `delegate` | `setDelegate(...)` / `getDelegate()` | 接收 `WaveNoteBluetoothFirmwareUpdateDelegate` 进度；弱引用，宿主必须保持代理存活 |
+| `snapshot` | `getSnapshot()` | 读取最近的 `WaveNoteOTAProgress?`；初始为 `null`，终态保留到后续已接受的操作更新 |
+| `cancel(completion)` | `cancel(WaveNoteControlCompletion)` | 请求原生取消；以 completion 和后续终态确认结果 |
+
+### 完整 Kotlin 示例
+
+将下面的客户端作为页面或业务控制器的属性持有，覆盖整次升级生命周期；不要只在点击事件中创建临时代理。调用 `start(file)` 时传入已复制到 App 本地目录的固件文件。
+
+```kotlin
+import cn.wavenote.sdk.*
+import java.io.File
+
+class BluetoothOTAClient(sdk: WaveNoteSDK) : WaveNoteBluetoothFirmwareUpdateDelegate {
+    private val updater = sdk.bluetoothFirmwareUpdate
+
+    init {
+        updater.delegate = this
+    }
+
+    val snapshot: WaveNoteOTAProgress? get() = updater.snapshot
+
+    fun start(file: File): WaveNoteOperation = updater.start(file) { error ->
+        when {
+            error == null -> println("固件升级成功，业务连接就绪另看 SDK 连接代理")
+            error.errorCode == WaveNoteErrorCode.OPERATION_CANCELLED ->
+                println("蓝牙固件升级已取消")
+            else -> println("OTA 未完成 code=${error.code} operation=${error.operation}")
+        }
+    }
+
+    fun cancel() {
+        if (updater.snapshot?.canCancel != true) {
+            println("当前阶段不可取消")
+            return
+        }
+        updater.cancel { error ->
+            if (error == null) {
+                println("原生已确认取消，等待升级终态回调")
+            } else {
+                println("取消未确认 code=${error.code} operation=${error.operation}")
+            }
+        }
+    }
+
+    override fun didUpdate(updater: WaveNoteBluetoothFirmwareUpdate,
+                           progress: WaveNoteOTAProgress) {
+        // 在此更新阶段、进度条和取消按钮；按钮可用性使用 canCancel。
+        println("OTA state=${progress.state.value} progress=${progress.progress}% canCancel=${progress.canCancel}")
+    }
+}
+```
+
+宿主持有客户端后调用 `client.start(localFirmwareFile)`；页面重绘可读取 `client.snapshot`，用户点击取消时调用 `client.cancel()`。返回令牌的 `identifier` 与进度的 `operationID` 对应；释放令牌不会取消升级。需要处理取消结果时使用管理器的 `cancel(completion)`，令牌 `cancel()` 也只发起请求，不保证设备退出刷写。
+
+### 进度字段与状态枚举
+
+| `WaveNoteOTAProgress` 字段 | 含义 |
+| --- | --- |
+| `operationID: UUID` | 本地操作标识，用于区分任务及其回调 |
+| `state: WaveNoteOTAState` | 当前统一阶段，见下表 |
+| `progress: Int` | 0…100；初始准备为 0，升级阶段最多 99，只有明确成功才为 100 |
+| `canCancel: Boolean` | 当前原生阶段是否允许请求取消 |
+| `error: WaveNoteError?` | 当前进度携带的失败或取消原因；也须处理 start 的 completion |
+| `nativeErrorCode: Int?` | 原生数值诊断代码；业务判断使用 `error.code` 或 `error.errorCode` |
+
+两端状态数值一致，但不保证每次升级都会经过全部阶段：
+
+| 数值 | `WaveNoteOTAState` | 含义与 UI 处理 |
+| --- | --- | --- |
+| 0 | `PREPARING` | 准备、认证或 Loader 准备，显示准备状态 |
+| 1 | `UPGRADING` | 正在传输或执行固件升级，显示进度及 `canCancel` |
+| 2 | `RECONNECTING` | SDK 正在处理升级所需回连，等待状态推进 |
+| 3 | `REBOOTING` | 原生明确进入重启阶段时报告，等待结果 |
+| 4 | `COMPLETED` | 原生明确确认升级成功，进度为 100 |
+| 5 | `CANCELLED` | 本次升级已取消；不表示设备已回滚 |
+| 6 | `FAILED` | 本次升级失败，按错误码提示并结束本次操作 |
+
+升级进度非递减；回连后的准备、重启、取消或失败保留已有百分比。写入成功、上传完毕、99%、断连或重启都不能单独作为升级成功依据。原生没有独立重启回调时，SDK 不补造 `REBOOTING` 事件。成功或原生确认取消后，SDK 尝试恢复业务连接；业务可用以 SDK 连接代理报告 `READY` 为准，恢复失败不会改写已确认的 OTA 成功结果。
+
+取消按钮使用 `snapshot?.canCancel == true`；阶段可能在点击时变化，因此仍须处理取消 completion。拒绝取消返回 `OPERATION_BLOCKED`（1106），5 秒未确认返回 `OPERATION_OUTCOME_UNKNOWN`（1203），随后以原任务的真实终态为准。已确认取消时，原始 start completion 会返回 `OPERATION_CANCELLED`（1017）。
+
+### OTA 错误码 1301–1309
+
+业务使用 `WaveNoteError.code` 或 `errorCode` 判断；`operation` 用于诊断定位，不解析错误正文或原生数值来替代稳定错误码。拒绝升级不会自动停止录音、取消传输或关闭设备 Wi-Fi。
+
+| 错误码 | `WaveNoteErrorCode` | 原因 | 处理方式 |
+| --- | --- | --- | --- |
+| 1301 | `OTA_RECORDING_ACTIVE` | 正在录音或暂停录音 | 先结束录音；暂停仍不可升级 |
+| 1302 | `OTA_FILE_TRANSFER_ACTIVE` | BLE/Wi-Fi 文件传输、续传、转换或收尾未完成 | 等待整个任务完成 |
+| 1303 | `OTA_LIVE_AUDIO_ACTIVE` | 实时音频运行中或停止中 | 先结束实时流并等待停止确认 |
+| 1304 | `OTA_WIFI_ACTIVE` | 设备 Wi-Fi 快传开启、使用、关闭或恢复 BLE 中 | 结束快传，等待业务连接恢复 `READY` |
+| 1305 | `OTA_ALREADY_IN_PROGRESS` | 已有 OTA、前置检查或原生 OTA 事务 | 等待当前任务结束，避免重复提交 |
+| 1306 | `OTA_USB_ACTIVE` | 已确认 USB 连接或挂载 | 断开 USB，等待设备上报断开状态 |
+| 1307 | `OTA_DEVICE_BUSY` | 设置、删除、维护、身份或其他控制事务未完成 | 等待控制事务结束 |
+| 1308 | `OTA_DEVICE_STATE_UNAVAILABLE` | 状态查询失败、录音状态未知或 USB 明确上报无效值 | 重新连接并确认设备状态后再由用户重试 |
+| 1309 | `OTA_POWER_INSUFFICIENT` | 设备或原生 SDK 明确报告电量/电压不足 | 先充电，再由用户重新发起 |
+
+新 BLE 会话就绪且没有收到 USB 上报时，默认 USB 未连接；有效 `116` 通知或 `102.usb_connect` 更新本会话状态，`usb_state` 只表示功能开关。仅未收到 USB 上报不会触发 1308，录音状态仍须确认停止；状态查询超时会关闭不确定会话。SDK 不盲目重发超时指令，也不自行设定低电量百分比阈值。单纯充电、开启边录边传选项但没有活动流，不单独禁止 OTA。
+
+连接、权限、本地文件、取消及升级阶段失败仍沿用 SDK 的其他错误码。固件正确性、真实刷写、回连、取消及成功后的业务连接恢复须在指定真机单独验收；文档示例和编译通过不代表真机 OTA 已通过。
