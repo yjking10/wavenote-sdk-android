@@ -2,6 +2,8 @@
 
 本项目展示如何在 Android 应用中集成 WaveNote SDK，完成设备扫描、绑定、连接、录音控制、设备设置和音频文件同步。本文面向应用开发者；服务端鉴权与账户归属由接入方实现。
 
+当前内置 `WaveNoteSDK 0.2.8`，可通过 `WaveNoteSDK.SDK_VERSION` 查看 SDK 版本。
+
 可运行参考代码：[Kotlin](app/src/main/java/cn/wavenote/demo/KotlinIntegration.kt) · [Java](app/src/main/java/cn/wavenote/demo/JavaIntegration.java) · [Identity Provider](app/src/main/java/cn/wavenote/demo/IdentityProvider.kt)。
 
 ## 集成前提
@@ -22,7 +24,7 @@
 
 ```kotlin
 dependencies {
-    implementation(files("libs/wavenote-sdk-0.2.7.aar"))
+    implementation(files("libs/wavenote-sdk-0.2.8.aar"))
     implementation(files("libs/wavenote-audio-engine-1.0.2.aar"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
     // 本地 AAR 不会自动解析运行依赖；蓝牙 OTA 的权限检查需要 Core
@@ -35,7 +37,7 @@ dependencies {
 }
 ```
 
-宿主的 `gradle.properties` 需设置 `android.useAndroidX=true`。Maven 接入 `cn.wavenote:wavenote-sdk:0.2.7` 会自动解析 Core；本地 AAR 按上面的依赖配置。
+宿主的 `gradle.properties` 需设置 `android.useAndroidX=true`。Maven 接入 `cn.wavenote:wavenote-sdk:0.2.8` 会自动解析 Core；本地 AAR 按上面的依赖配置。
 
 Demo 的 [AndroidManifest.xml](app/src/main/AndroidManifest.xml) 可作为权限声明参考；仍须在运行时向用户请求相应权限。
 
@@ -47,7 +49,7 @@ Demo 的 [AndroidManifest.xml](app/src/main/AndroidManifest.xml) 可作为权限
 
 宿主调用 `sdk.exportDiagnostics { file, error -> ... }`，通过只读 ContentProvider 生成 `content://` URI，再使用 `ACTION_SEND`、`ClipData`、`FLAG_GRANT_READ_URI_PERMISSION` 和 `Intent.createChooser` 打开分享。完整实现见 `MainActivity.kt`、`DiagnosticsShareProvider.kt` 及 Manifest 注册；Provider 不导出，只接受临时授权，拒绝目录枚举、路径穿越和写入，不需要存储权限或额外依赖。SDK 不联网上传。
 
-`app/libs/wavenote-sdk-0.2.7.aar` 已更新为包含生产诊断配置接口的本地构建版。
+`app/libs/wavenote-sdk-0.2.8.aar` 已更新为包含生产诊断配置接口的本地构建版。
 
 ## Audio Engine：本地音频处理
 
