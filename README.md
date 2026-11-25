@@ -381,9 +381,27 @@ Provider 可参考 [IdentityProvider.kt](app/src/main/java/cn/wavenote/demo/Iden
 
 ## 蓝牙固件升级
 
-设备设置 → 蓝牙固件升级 → 选择固件文件 → 开始升级。完整页面及导入代码见 [MainActivity.kt](app/src/main/java/cn/wavenote/demo/MainActivity.kt)。
+设备设置 → 蓝牙固件升级 → 选择固件文件 → 开始升级。页面见 [MainActivity.kt](app/src/main/java/cn/wavenote/demo/MainActivity.kt)，任务持有和导入代码见 [DemoBluetoothFirmware.kt](app/src/main/java/cn/wavenote/demo/DemoBluetoothFirmware.kt)。
 
 公开 OTA 入口为 `sdk.bluetoothFirmwareUpdate`，用于杰理蓝牙固件。原生依赖已内置，无需 Flutter 或单独接管杰理连接；开始时复用当前已就绪的 BLE 连接，SDK 处理升级期间的必要断开和回连。乐鑫 OTA 仅内部保留实现，暂不提供公共入口。
+
+### Demo 页面操作
+
+- 升级任务由 Demo 控制器持有。升级中返回会提示，可留在首页并从“蓝牙固件升级”重新查看；期间拦截返回键退出、手动断开和解绑，直到 start 的最终 completion 才解除保护。配置变化引起 Activity 重建时复用控制器和升级任务。
+- 页面和开始确认框显示原始固件名、大小、目标设备名称/SN 及当前上报版本。空文件、过大或不可读的文件导入失败时明确提示，并保留上一份固件；成功选择新固件会清除上次结果和百分比。
+- 点击取消后显示“等待取消结果…”并禁止重复点击。取消请求确认后继续等待本次升级的最终回调，期间仍保留升级保护；取消请求失败会提示原因，并按 SDK 当前状态决定能否再次请求。
+- 最终升级成功后单独显示业务连接恢复状态。目标设备重新就绪时查询硬件信息，展示设备上报版本；版本读取失败会提示到设备设置刷新，不改写已确认的升级结果。上报版本不等于按文件名验证升级包版本。
+
+任务只保存在当前进程内，请保持 App 在前台；系统终止进程后需重新确认设备状态，Demo 不自动重放升级。
+
+自动化状态测试见 [DemoOTAFlowTest.kt](app/src/test/java/cn/wavenote/demo/DemoOTAFlowTest.kt)，覆盖终态前退出保护、取消确认、连接恢复、重新选包及过期回调隔离。以下真机场景均待验收：
+
+| 场景 | 验收要点 |
+| --- | --- |
+| 升级中返回、重新进入或 Activity 重建 | 进度持续更新，不断开或重复启动升级；退出/断开/解绑受保护 |
+| 导入新文件或导入失败 | 原名和大小正确；失败明确保留旧包；新包清除旧结果 |
+| 连续点击取消及取消竞争 | 只发起一次在途取消，以最终回调显示结果 |
+| 升级成功及业务回连 | 先显示升级完成，再显示目标设备连接恢复及设备上报版本 |
 
 ### 调用前提与接口
 

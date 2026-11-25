@@ -97,6 +97,7 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
         else -> "可在文件同步过程中切换，未完成文件会从断点继续"
     }
     var changed: (() -> Unit)? = null
+    val firmware = DemoBluetoothFirmware(context, sdk) { changed?.invoke() }
     var devices = emptyList<WaveNoteDiscoveredDevice>(); private set
     var snapshot: WaveNoteSettingsSnapshot? = null; private set
     var mode: Int? = null; private set
@@ -116,7 +117,7 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
         sdk.setProductionDiagnosticsEnabled(true)
         sdk.configure(WaveNoteSDKConfiguration("demo-user", enableAutoReconnect = true, identityProvider = identity, enableLiveAudio = true))
     }
-    fun dispose() { changed = null; resetAudio(); player.dispose(); sdk.files.delegate = null; sdk.wifi.delegate = null; handler.removeCallbacksAndMessages(null); sdk.disconnectDevice(); sdk.delegate = null; sdk.deviceSettings.delegate = null; sdk.recording.delegate = null }
+    fun dispose() { changed = null; firmware.dispose(); resetAudio(); player.dispose(); sdk.files.delegate = null; sdk.wifi.delegate = null; handler.removeCallbacksAndMessages(null); sdk.disconnectDevice(); sdk.delegate = null; sdk.deviceSettings.delegate = null; sdk.recording.delegate = null }
     fun scan() {
         if (scanning || flow.busy || flow.ready) return
         // startScanning 会重新读取系统权限与蓝牙状态，不能用上次 UNAUTHORIZED 快照阻止重试。
@@ -192,7 +193,7 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
         }
         if (starting) sdk.recording.start(completion) else sdk.recording.stop(completion)
     }
-    fun disconnect() { if (!flow.busy) sdk.disconnectDevice() }
+    fun disconnect() { if (firmware.flow.protectsExit) { status = "正在升级固件，请等待升级结束后再断开连接。"; changed?.invoke(); return }; if (!flow.busy) sdk.disconnectDevice() }
     fun toggleFastTransfer() {
         if (wifiWorkflow) {
             status = "正在停止 Wi-Fi 传输，随后恢复蓝牙…"
@@ -209,6 +210,7 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
         startSync(WaveNoteTransferTransport.WIFI)
     }
     fun unbind(eraseDeviceFiles: Boolean = false) {
+        if (firmware.flow.protectsExit) { status = "正在升级固件，请等待升级结束后再解绑。"; changed?.invoke(); return }
         val token = flow.beginSetting() ?: return
         val clearsDeviceFiles = eraseDeviceFiles && sdk.connectedDevice?.serialNumber?.startsWith("R202") == true
         status = if (clearsDeviceFiles) "正在解绑并清空内容…" else "正在解绑…"; changed?.invoke()
@@ -226,6 +228,7 @@ class DemoController(context: Context) : WaveNoteSDKDelegate, WaveNoteDeviceSett
     }
     override fun didUpdateDiscoveredDevices(sdk: WaveNoteSDK, devices: List<WaveNoteDiscoveredDevice>) { this.devices = devices; changed?.invoke() }
     override fun didChangeConnectionState(sdk: WaveNoteSDK, state: WaveNoteConnectionState, device: WaveNoteDevice?) {
+        firmware.connectionChanged()
         if (state == WaveNoteConnectionState.DISCONNECTED && flow.selecting) return
         if (wifiWorkflow && state != WaveNoteConnectionState.READY) {
             if (wifiFallback.pending && state == WaveNoteConnectionState.FAILED) { failWiFiFallback(); return }
